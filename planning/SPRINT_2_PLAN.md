@@ -98,7 +98,7 @@ Harmony is a search-engine-indexable chat app (Discord-like clone). The frontend
 - Labels: backend, feature, week-1
 - Assignee: declanblanc
 - Due: March 6
-- Depends on: #2, #3, #6
+- Depends on: #2, #3
 
 **8. Message Service & API**
 - Message CRUD via tRPC: getMessages(channelId, pagination), sendMessage, editMessage, deleteMessage (soft delete)
@@ -108,7 +108,7 @@ Harmony is a search-engine-indexable chat app (Discord-like clone). The frontend
 - Labels: backend, feature, week-1
 - Assignee: FardeenI
 - Due: March 6
-- Depends on: #2, #3, #7
+- Depends on: #2, #3
 
 **9. Role-Based Permission & Authorization System**
 - Permission service: checkPermission(userId, serverId, action)
@@ -347,9 +347,11 @@ Harmony is a search-engine-indexable chat app (Discord-like clone). The frontend
 ## Dependency Graph (simplified)
 ```
 #1 Scaffold ─► #2 Dev Specs & Architecture ─┬─► #3 DB Schema ─┬─► #5 Users ──► #9 Permissions ──► #12 Visibility ──► #13 Audit Log
-                                             │                 ├─► #6 Servers ──► #7 Channels ──► #8 Messages     ──► #14 SEO
-                                             │                 ├─► #10 Membership                                  ──► #15 Public API
-                                             │                 └─► #11 Seeds                                       ──► #19 Attachments
+                                             │                 ├─► #6 Servers                                       ──► #14 SEO
+                                             │                 ├─► #7 Channels                                      ──► #15 Public API
+                                             │                 ├─► #8 Messages                                      ──► #19 Attachments
+                                             │                 ├─► #10 Membership
+                                             │                 └─► #11 Seeds
                                              │
                                              └─► #4 Auth ──► #9 Permissions
                                                           ──► #20 FE Auth ──► #26 Auth Middleware
