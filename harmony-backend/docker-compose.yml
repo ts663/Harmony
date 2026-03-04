@@ -4,7 +4,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: harmony
-      POSTGRES_PASSWORD: harmony
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-harmony}
       POSTGRES_DB: harmony_dev
     ports:
       - "5432:5432"
@@ -14,7 +14,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --requirepass devsecret
+    command: "redis-server --requirepass ${REDIS_PASSWORD:-devsecret}"
     ports:
       - "6379:6379"
     volumes:
