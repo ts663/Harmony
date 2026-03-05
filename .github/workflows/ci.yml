@@ -42,6 +42,22 @@ jobs:
     defaults:
       run:
         working-directory: harmony-backend
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: harmony
+          POSTGRES_PASSWORD: harmony
+          POSTGRES_DB: harmony_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://harmony:harmony@localhost:5432/harmony_dev
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +75,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Run migrations
+        run: npx prisma migrate deploy
 
       - name: Test
         run: npm test

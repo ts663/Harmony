@@ -1,0 +1,168 @@
+// Harmony — canonical database schema
+// Reference: docs/unified-backend-architecture.md §4.1 – §4.3
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+/// Canonical visibility states for a channel.
+/// Preserve these values exactly — referenced across all specs.
+enum ChannelVisibility {
+  PUBLIC_INDEXABLE
+  PUBLIC_NO_INDEX
+  PRIVATE
+
+  @@map("channel_visibility")
+}
+
+/// Channel content type.
+enum ChannelType {
+  TEXT
+  VOICE
+  ANNOUNCEMENT
+
+  @@map("channel_type")
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  username      String   @unique @db.VarChar(32)
+  displayName   String   @map("display_name") @db.VarChar(100)
+  avatarUrl     String?  @map("avatar_url") @db.VarChar(500)
+  publicProfile Boolean  @default(true) @map("public_profile")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  messages           Message[]
+  visibilityAuditLog VisibilityAuditLog[] @relation("AuditActor")
+
+  @@map("users")
+}
+
+model Server {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @db.VarChar(100)
+  slug        String   @unique(map: "idx_servers_slug") @db.VarChar(100)
+  description String?  @db.Text
+  iconUrl     String?  @map("icon_url") @db.VarChar(500)
+  isPublic    Boolean  @default(false) @map("is_public")
+  memberCount Int      @default(0) @map("member_count")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  channels Channel[]
+
+  // idx_servers_slug is pinned via map: on the @unique above.
+  // idx_servers_public (partial WHERE is_public = TRUE) is added in the
+  // migration SQL directly — Prisma does not support partial indexes in schema DSL.
+  @@map("servers")
+}
+
+model Channel {
+  id         String            @id @default(uuid()) @db.Uuid
+  serverId   String            @map("server_id") @db.Uuid
+  name       String            @db.VarChar(100)
+  slug       String            @db.VarChar(100)
+  type       ChannelType       @default(TEXT) @map("channel_type")
+  visibility ChannelVisibility @default(PRIVATE)
+  topic      String?           @db.Text
+  position   Int               @default(0)
+  indexedAt  DateTime?         @map("indexed_at") @db.Timestamptz
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime          @updatedAt @map("updated_at") @db.Timestamptz
+
+  server            Server              @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  messages          Message[]
+  auditLog          VisibilityAuditLog[]
+  generatedMetaTags GeneratedMetaTags?
+
+  // Composite unique — one slug per server
+  @@unique([serverId, slug], map: "idx_channels_server_slug")
+  // Composite index — fast filter by server + visibility
+  @@index([serverId, visibility], map: "idx_channels_server_visibility")
+  // Partial indexes (WHERE visibility = ... / WHERE visibility IN (...)) are
+  // added as raw SQL in the migration — see migration.sql comments.
+  @@map("channels")
+}
+
+model Message {
+  id        String    @id @default(uuid()) @db.Uuid
+  channelId String    @map("channel_id") @db.Uuid
+  authorId  String    @map("author_id") @db.Uuid
+  content   String    @db.Text
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  editedAt  DateTime? @map("edited_at") @db.Timestamptz
+  isDeleted Boolean   @default(false) @map("is_deleted")
+
+  channel     Channel     @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author      User        @relation(fields: [authorId], references: [id])
+  attachments Attachment[]
+
+  // idx_messages_channel_time (non-partial) and
+  // idx_messages_channel_not_deleted (partial WHERE is_deleted = FALSE)
+  // are both added as raw SQL in the migration.
+  @@map("messages")
+}
+
+model Attachment {
+  id          String @id @default(uuid()) @db.Uuid
+  messageId   String @map("message_id") @db.Uuid
+  filename    String @db.VarChar(255)
+  url         String @db.VarChar(500)
+  contentType String @map("content_type") @db.VarChar(100)
+  sizeBytes   BigInt @map("size_bytes")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("attachments")
+}
+
+model VisibilityAuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  channelId String   @map("channel_id") @db.Uuid
+  actorId   String   @map("actor_id") @db.Uuid
+  action    String   @db.VarChar(50)
+  oldValue  Json     @map("old_value")
+  newValue  Json     @map("new_value")
+  timestamp DateTime @default(now()) @db.Timestamptz
+  ipAddress String   @map("ip_address") @db.Inet
+  userAgent String   @map("user_agent") @db.VarChar(500)
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  actor   User    @relation("AuditActor", fields: [actorId], references: [id])
+
+  // Both indexes below are added as raw SQL in the migration (DESC ordering
+  // cannot be expressed in Prisma schema DSL for composite indexes).
+  @@map("visibility_audit_log")
+}
+
+model GeneratedMetaTags {
+  id                String   @id @default(uuid()) @db.Uuid
+  channelId         String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
+  title             String   @db.VarChar(120)
+  description       String   @db.VarChar(320)
+  ogTitle           String   @map("og_title") @db.VarChar(120)
+  ogDescription     String   @map("og_description") @db.VarChar(320)
+  ogImage           String?  @map("og_image") @db.VarChar(500)
+  twitterCard       String   @map("twitter_card") @db.VarChar(20)
+  keywords          String   @db.Text
+  structuredData    Json     @map("structured_data")
+  contentHash       String   @map("content_hash") @db.VarChar(64)
+  needsRegeneration Boolean  @default(false) @map("needs_regeneration")
+  generatedAt       DateTime @default(now()) @map("generated_at") @db.Timestamptz
+  schemaVersion     Int      @default(1) @map("schema_version")
+
+  channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  // idx_meta_tags_channel is pinned via map: on the @unique above.
+  // idx_meta_tags_needs_regen (partial WHERE needs_regeneration = TRUE)
+  // is added as raw SQL in the migration.
+  @@map("generated_meta_tags")
+}

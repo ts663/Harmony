@@ -735,8 +735,8 @@ erDiagram
         UUID server_id FK
         VARCHAR_100 name
         VARCHAR_100 slug
-        channel_type_enum channel_type
-        visibility_enum visibility
+        channel_type channel_type
+        channel_visibility visibility
         TEXT topic
         INTEGER position
         TIMESTAMPTZ indexed_at
@@ -805,8 +805,8 @@ erDiagram
 ### 4.2 Enum Definition
 
 ```sql
-CREATE TYPE visibility_enum AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
-CREATE TYPE channel_type_enum AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
+CREATE TYPE channel_visibility AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
+CREATE TYPE channel_type AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
 ```
 
 ### 4.3 Index Strategy (Canonical Set)
@@ -1274,7 +1274,7 @@ graph TB
     subgraph MD2["M-D2 Persistence"]
         Schema["Prisma Schema<br/>(schema.prisma)"]
         Migrations["Prisma Migrations"]
-        EnumDef["visibility_enum<br/>PUBLIC_INDEXABLE · PUBLIC_NO_INDEX · PRIVATE"]
+        EnumDef["channel_visibility<br/>PUBLIC_INDEXABLE · PUBLIC_NO_INDEX · PRIVATE"]
     end
 
     Schema --> Migrations
