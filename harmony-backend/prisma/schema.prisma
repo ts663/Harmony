@@ -18,6 +18,8 @@ enum ChannelVisibility {
   PUBLIC_INDEXABLE
   PUBLIC_NO_INDEX
   PRIVATE
+
+  @@map("channel_visibility")
 }
 
 /// Channel content type.
@@ -25,6 +27,8 @@ enum ChannelType {
   TEXT
   VOICE
   ANNOUNCEMENT
+
+  @@map("channel_type")
 }
 
 // ─── Models ──────────────────────────────────────────────────────────────────
@@ -46,7 +50,7 @@ model User {
 model Server {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @db.VarChar(100)
-  slug        String   @unique @db.VarChar(100)
+  slug        String   @unique(map: "idx_servers_slug") @db.VarChar(100)
   description String?  @db.Text
   iconUrl     String?  @map("icon_url") @db.VarChar(500)
   isPublic    Boolean  @default(false) @map("is_public")
@@ -55,7 +59,7 @@ model Server {
 
   channels Channel[]
 
-  // idx_servers_slug is covered by the @unique above.
+  // idx_servers_slug is pinned via map: on the @unique above.
   // idx_servers_public (partial WHERE is_public = TRUE) is added in the
   // migration SQL directly — Prisma does not support partial indexes in schema DSL.
   @@map("servers")
@@ -128,7 +132,7 @@ model VisibilityAuditLog {
   oldValue  Json     @map("old_value")
   newValue  Json     @map("new_value")
   timestamp DateTime @default(now()) @db.Timestamptz
-  ipAddress String   @map("ip_address") @db.VarChar(45)
+  ipAddress String   @map("ip_address") @db.Inet
   userAgent String   @map("user_agent") @db.VarChar(500)
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
@@ -141,7 +145,7 @@ model VisibilityAuditLog {
 
 model GeneratedMetaTags {
   id                String   @id @default(uuid()) @db.Uuid
-  channelId         String   @unique @map("channel_id") @db.Uuid
+  channelId         String   @unique(map: "idx_meta_tags_channel") @map("channel_id") @db.Uuid
   title             String   @db.VarChar(120)
   description       String   @db.VarChar(320)
   ogTitle           String   @map("og_title") @db.VarChar(120)
@@ -157,7 +161,7 @@ model GeneratedMetaTags {
 
   channel Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
 
-  // idx_meta_tags_channel is covered by @unique above.
+  // idx_meta_tags_channel is pinned via map: on the @unique above.
   // idx_meta_tags_needs_regen (partial WHERE needs_regeneration = TRUE)
   // is added as raw SQL in the migration.
   @@map("generated_meta_tags")

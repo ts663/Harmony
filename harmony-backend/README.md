@@ -28,6 +28,22 @@ npm run lint      # eslint src tests
 npm test          # jest
 ```
 
+## Setting Up Prisma Locally
+
+```bash
+# 1. Start Postgres (only needed once per machine session)
+docker compose up -d postgres
+
+# 2. Copy env (only once)
+cp .env.example .env
+
+# 3. Apply migrations (once, and again after any schema change)
+npx prisma migrate deploy
+
+# 4. Run tests
+npm test
+```
+
 ## Environment
 
 Copy `.env.example` to `.env` and fill in values before running locally.

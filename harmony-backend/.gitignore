@@ -10,4 +10,3 @@ dist/
 # TypeScript incremental build
 *.tsbuildinfo
 
-/src/generated/prisma

@@ -1,8 +1,8 @@
 -- CreateEnum
-CREATE TYPE "ChannelVisibility" AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
+CREATE TYPE "channel_visibility" AS ENUM ('PUBLIC_INDEXABLE', 'PUBLIC_NO_INDEX', 'PRIVATE');
 
 -- CreateEnum
-CREATE TYPE "ChannelType" AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
+CREATE TYPE "channel_type" AS ENUM ('TEXT', 'VOICE', 'ANNOUNCEMENT');
 
 -- CreateTable
 CREATE TABLE "users" (
@@ -36,8 +36,8 @@ CREATE TABLE "channels" (
     "server_id" UUID NOT NULL,
     "name" VARCHAR(100) NOT NULL,
     "slug" VARCHAR(100) NOT NULL,
-    "channel_type" "ChannelType" NOT NULL DEFAULT 'TEXT',
-    "visibility" "ChannelVisibility" NOT NULL DEFAULT 'PRIVATE',
+    "channel_type" "channel_type" NOT NULL DEFAULT 'TEXT',
+    "visibility" "channel_visibility" NOT NULL DEFAULT 'PRIVATE',
     "topic" TEXT,
     "position" INTEGER NOT NULL DEFAULT 0,
     "indexed_at" TIMESTAMPTZ,
@@ -81,7 +81,7 @@ CREATE TABLE "visibility_audit_log" (
     "old_value" JSONB NOT NULL,
     "new_value" JSONB NOT NULL,
     "timestamp" TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "ip_address" VARCHAR(45) NOT NULL,
+    "ip_address" INET NOT NULL,
     "user_agent" VARCHAR(500) NOT NULL,
 
     CONSTRAINT "visibility_audit_log_pkey" PRIMARY KEY ("id")
@@ -111,7 +111,7 @@ CREATE TABLE "generated_meta_tags" (
 CREATE UNIQUE INDEX "users_username_key" ON "users"("username");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "servers_slug_key" ON "servers"("slug");
+CREATE UNIQUE INDEX "idx_servers_slug" ON "servers"("slug");
 
 -- CreateIndex
 CREATE INDEX "idx_channels_server_visibility" ON "channels"("server_id", "visibility");
@@ -120,7 +120,7 @@ CREATE INDEX "idx_channels_server_visibility" ON "channels"("server_id", "visibi
 CREATE UNIQUE INDEX "idx_channels_server_slug" ON "channels"("server_id", "slug");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "generated_meta_tags_channel_id_key" ON "generated_meta_tags"("channel_id");
+CREATE UNIQUE INDEX "idx_meta_tags_channel" ON "generated_meta_tags"("channel_id");
 
 -- AddForeignKey
 ALTER TABLE "channels" ADD CONSTRAINT "channels_server_id_fkey" FOREIGN KEY ("server_id") REFERENCES "servers"("id") ON DELETE CASCADE ON UPDATE CASCADE;
