@@ -906,6 +906,38 @@ graph LR
 
 All tRPC procedures are mounted under `/trpc` and require a valid session.
 
+#### tRPC Context
+
+Every tRPC procedure receives a typed `TRPCContext` injected by `createContext` in `src/trpc/init.ts`:
+
+```typescript
+// src/trpc/init.ts
+export interface TRPCContext {
+  userId: string | null;   // null for unauthenticated requests
+  ip: string;              // client IP for audit logging
+}
+
+// Context is populated from the Express session (or JWT middleware) at request time:
+export function createContext({ req }: { req: Request }): TRPCContext {
+  const session = (req as Request & { session?: { userId?: string } }).session;
+  return { userId: session?.userId ?? null, ip: req.ip ?? '' };
+}
+```
+
+`createContext` is passed to `createExpressMiddleware` in `src/app.ts` so every procedure
+receives a populated context automatically.
+
+#### Procedure base types
+
+| Base | Guard | Usage |
+|------|-------|-------|
+| `publicProcedure` | none | Health checks, unauthenticated queries |
+| `authedProcedure` | throws `UNAUTHORIZED` if `ctx.userId` is null | All admin/visibility/meta-tag procedures |
+
+`authedProcedure` narrows `ctx.userId` to `string` (non-null) for downstream handlers, so
+`PermissionService.isServerAdmin(ctx.userId, channelId)` and `AuditLogService` can safely
+read `ctx.userId` and `ctx.ip` without additional null checks.
+
 ```mermaid
 graph LR
     subgraph tRPC["tRPC Router (/trpc)"]
