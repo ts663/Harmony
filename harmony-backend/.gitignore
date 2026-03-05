@@ -9,3 +9,5 @@ dist/
 !.env.example
 # TypeScript incremental build
 *.tsbuildinfo
+
+/src/generated/prisma
