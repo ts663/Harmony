@@ -16,9 +16,11 @@ jobs:
           PR_NUM: ${{ github.event.pull_request.number }}
           USER: ${{ github.event.pull_request.user.login }}
         run: |
+          jq -n \
+            --arg tn "PR #$PR_NUM: $PR_TITLE" \
+            --arg ct "**New Pull Request opened by @$USER:**\n$PR_URL" \
+            --arg tag "1479275090901336146" \
+            '{thread_name: $tn, content: $ct, applied_tags: [$tag]}' | \
           curl -s -X POST "$WEBHOOK_URL" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"thread_name\": \"PR #$PR_NUM: $PR_TITLE\",
-              \"content\": \"**New Pull Request opened by @$USER:**\n$PR_URL\"
-            }"
+            -d @-
