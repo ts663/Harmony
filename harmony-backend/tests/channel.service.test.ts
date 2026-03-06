@@ -81,6 +81,8 @@ describe('channelService.createChannel', () => {
         serverId: '00000000-0000-0000-0000-000000000000',
         name: 'orphan',
         slug: 'orphan',
+        type: 'TEXT',
+        visibility: 'PRIVATE',
       }),
     ).rejects.toThrow(TRPCError);
   });
@@ -190,6 +192,8 @@ describe('channelService.deleteChannel', () => {
       serverId,
       name: 'to-delete',
       slug: 'to-delete',
+      type: 'TEXT',
+      visibility: 'PRIVATE',
     });
     await channelService.deleteChannel(channel.id);
     const found = await prisma.channel.findUnique({ where: { id: channel.id } });

@@ -6,8 +6,8 @@ export interface CreateChannelInput {
   serverId: string;
   name: string;
   slug: string;
-  type?: ChannelType;
-  visibility?: ChannelVisibility;
+  type: ChannelType;
+  visibility: ChannelVisibility;
   topic?: string;
   position?: number;
 }
@@ -15,7 +15,6 @@ export interface CreateChannelInput {
 export interface UpdateChannelInput {
   name?: string;
   topic?: string;
-  description?: string;
   position?: number;
 }
 
@@ -44,7 +43,7 @@ export const channelService = {
   },
 
   async createChannel(input: CreateChannelInput) {
-    const { serverId, name, slug, type = 'TEXT', visibility = 'PRIVATE', topic, position = 0 } = input;
+    const { serverId, name, slug, type, visibility, topic, position = 0 } = input;
 
     // VOICE channels cannot be PUBLIC_INDEXABLE
     if (type === ChannelType.VOICE && visibility === ChannelVisibility.PUBLIC_INDEXABLE) {
