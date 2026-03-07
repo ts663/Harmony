@@ -10,11 +10,20 @@ export interface CacheOptions {
   staleTtl?: number; // extra seconds to serve stale data while revalidating
 }
 
+/**
+ * Sanitize an identifier before embedding it in a Redis key.
+ * Strips glob-special characters (* ? [ ]) to prevent pattern injection
+ * via crafted IDs in invalidatePattern calls.
+ */
+export function sanitizeKeySegment(segment: string): string {
+  return segment.replace(/[*?\[\]]/g, '');
+}
+
 // Key patterns from spec
 export const CacheKeys = {
-  channelVisibility: (id: string) => `channel:${id}:visibility`,
-  channelMessages: (id: string, page: number) => `channel:msgs:${id}:page:${page}`,
-  serverInfo: (id: string) => `server:${id}:info`,
+  channelVisibility: (id: string) => `channel:${sanitizeKeySegment(id)}:visibility`,
+  channelMessages: (id: string, page: number) => `channel:msgs:${sanitizeKeySegment(id)}:page:${page}`,
+  serverInfo: (id: string) => `server:${sanitizeKeySegment(id)}:info`,
 } as const;
 
 // TTLs from spec (seconds)

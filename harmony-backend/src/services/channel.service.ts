@@ -1,7 +1,7 @@
 import { TRPCError } from '@trpc/server';
 import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
-import { cacheService, CacheKeys, CacheTTL } from './cache.service';
+import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 
 export interface CreateChannelInput {
   serverId: string;
@@ -98,7 +98,7 @@ export const channelService = {
     });
 
     // Write-through: invalidate message caches (best-effort)
-    cacheService.invalidatePattern(`channel:msgs:${channelId}:*`).catch(() => {});
+    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
 
     return updated;
   },
@@ -113,7 +113,7 @@ export const channelService = {
 
     // Write-through: invalidate all caches for deleted channel (best-effort)
     cacheService.invalidate(CacheKeys.channelVisibility(channelId)).catch(() => {});
-    cacheService.invalidatePattern(`channel:msgs:${channelId}:*`).catch(() => {});
+    cacheService.invalidatePattern(`channel:msgs:${sanitizeKeySegment(channelId)}:*`).catch(() => {});
   },
 
   async createDefaultChannel(serverId: string) {

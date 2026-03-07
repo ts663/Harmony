@@ -6,7 +6,7 @@
  * Requires REDIS_URL pointing at a running Redis instance.
  */
 
-import { cacheService, CacheKeys, CacheTTL, CacheEntry } from '../src/services/cache.service';
+import { cacheService, CacheKeys, CacheTTL, CacheEntry, sanitizeKeySegment } from '../src/services/cache.service';
 import { redis } from '../src/db/redis';
 
 beforeAll(async () => {
@@ -36,6 +36,26 @@ describe('CacheKeys', () => {
 
   it('generates correct server info key', () => {
     expect(CacheKeys.serverInfo('srv-1')).toBe('server:srv-1:info');
+  });
+});
+
+// ─── Key sanitization ───────────────────────────────────────────────────────
+
+describe('sanitizeKeySegment', () => {
+  it('strips glob-special characters from keys', () => {
+    expect(sanitizeKeySegment('abc*def')).toBe('abcdef');
+    expect(sanitizeKeySegment('abc?def')).toBe('abcdef');
+    expect(sanitizeKeySegment('abc[0]def')).toBe('abc0def');
+  });
+
+  it('leaves valid UUIDs unchanged', () => {
+    const uuid = '550e8400-e29b-41d4-a716-446655440000';
+    expect(sanitizeKeySegment(uuid)).toBe(uuid);
+  });
+
+  it('produces safe cache keys via CacheKeys helpers', () => {
+    expect(CacheKeys.channelVisibility('*')).toBe('channel::visibility');
+    expect(CacheKeys.channelMessages('a]b[c', 1)).toBe('channel:msgs:abc:page:1');
   });
 });
 
