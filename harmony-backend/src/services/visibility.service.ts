@@ -63,8 +63,9 @@ export const visibilityService = {
         where: { id: channelId },
         data: {
           visibility,
-          // §6.3: set indexedAt when transitioning to PUBLIC_INDEXABLE
-          ...(visibility === ChannelVisibility.PUBLIC_INDEXABLE && { indexedAt: new Date() }),
+          // §6.3: set indexedAt only when transitioning TO PUBLIC_INDEXABLE (not on no-op updates)
+          ...(visibility === ChannelVisibility.PUBLIC_INDEXABLE &&
+            current.visibility !== ChannelVisibility.PUBLIC_INDEXABLE && { indexedAt: new Date() }),
         },
       });
 

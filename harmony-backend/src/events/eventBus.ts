@@ -34,10 +34,6 @@ const channelHandlerCounts = new Map<string, number>();
 // get a false-immediate-ready before the handshake completes.
 const channelReadyPromises = new Map<string, Promise<void>>();
 
-// How long to wait for a Redis subscribe handshake before giving up.
-// Resolves (not rejects) so callers never hang — subscription may succeed later.
-const SUBSCRIBE_TIMEOUT_MS = 5000;
-
 function getSubscriberClient(): Redis {
   if (!subscriberClient) {
     subscriberClient = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
@@ -81,11 +77,17 @@ export const eventBus = {
 
     const messageListener = (ch: string, message: string) => {
       if (ch !== channel) return;
+      let payload: EventPayloadMap[C];
       try {
-        const payload = JSON.parse(message) as EventPayloadMap[C];
-        handler(payload);
+        payload = JSON.parse(message) as EventPayloadMap[C];
       } catch (err) {
         console.error(`[EventBus] Failed to parse message on ${ch}:`, err);
+        return;
+      }
+      try {
+        handler(payload);
+      } catch (err) {
+        console.error(`[EventBus] Handler error on ${ch}:`, err);
       }
     };
 
@@ -96,19 +98,16 @@ export const eventBus = {
     if (prevCount === 0) {
       // First subscriber — issue SUBSCRIBE and store the in-flight handshake promise
       // so subsequent subscribers on the same channel wait for the same confirmation.
+      // ioredis queues the SUBSCRIBE command and fires the callback once Redis
+      // confirms — this resolves even on error so callers never hang.
       const handshake = new Promise<void>((resolve) => {
         client.subscribe(channel, (err) => {
           if (err) console.error(`[EventBus] Failed to subscribe to ${channel}:`, err);
-          resolve(); // resolve even on error so callers never hang
+          resolve();
         });
       });
-      // Race the handshake against a fallback timeout so callers don't block forever
-      // if Redis is temporarily unavailable (subscription may succeed after reconnect).
-      ready = Promise.race([
-        handshake,
-        new Promise<void>((resolve) => setTimeout(resolve, SUBSCRIBE_TIMEOUT_MS)),
-      ]);
-      channelReadyPromises.set(channel, ready);
+      ready = handshake;
+      channelReadyPromises.set(channel, handshake);
     } else {
       // Subsequent subscribers share the same in-flight promise so they wait until
       // Redis actually confirms the subscription rather than resolving immediately.

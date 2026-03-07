@@ -1,3 +1,8 @@
+// ─── Shared domain types ──────────────────────────────────────────────────────
+
+/** Canonical visibility values — mirrors the Prisma ChannelVisibility enum. */
+export type ChannelVisibilityValue = 'PUBLIC_INDEXABLE' | 'PUBLIC_NO_INDEX' | 'PRIVATE';
+
 // ─── Event channel names ──────────────────────────────────────────────────────
 
 export const EventChannels = {
@@ -15,8 +20,8 @@ export type EventChannelName = (typeof EventChannels)[keyof typeof EventChannels
 export interface VisibilityChangedPayload {
   channelId: string;
   serverId: string;
-  oldVisibility: string;
-  newVisibility: string;
+  oldVisibility: ChannelVisibilityValue;
+  newVisibility: ChannelVisibilityValue;
   actorId: string;
   timestamp: string; // ISO 8601
 }

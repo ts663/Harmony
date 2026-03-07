@@ -11,7 +11,10 @@ const server = app.listen(PORT, () => {
 
 cacheInvalidator.start().catch((err) => console.error('[cacheInvalidator] start failed:', err));
 
+let shuttingDown = false;
 const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
   const timer = setTimeout(() => process.exit(1), 10_000);
   await new Promise<void>((resolve) => server.close(() => resolve()));
   await cacheInvalidator.stop();

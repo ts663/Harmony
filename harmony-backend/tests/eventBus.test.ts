@@ -38,7 +38,16 @@ function waitFor(condition: () => boolean, timeout = 2000): Promise<void> {
 }
 
 beforeAll(async () => {
-  await redis.connect().catch(() => {});
+  try {
+    await redis.connect().catch(() => {});
+    await redis.ping();
+  } catch (err) {
+    const redisUrl = process.env.REDIS_URL ?? '<not set>';
+    throw new Error(
+      `Failed to connect to Redis for tests. Ensure a Redis instance is running and REDIS_URL is correctly set (current value: ${redisUrl}). ` +
+        `Original error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 });
 
 afterAll(async () => {
