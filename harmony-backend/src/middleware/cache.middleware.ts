@@ -7,8 +7,8 @@ export interface CacheMiddlewareOptions extends CacheOptions {
 
 /**
  * Express middleware that caches JSON responses for public API endpoints.
- * Uses stale-while-revalidate: serves stale data immediately while
- * refreshing in the background.
+ * Returns cached data on fresh hits; stale entries fall through to the
+ * route handler so the cache is refreshed on the next request.
  */
 export function cacheMiddleware(options: CacheMiddlewareOptions) {
   return async (req: Request, res: Response, next: NextFunction) => {
@@ -22,9 +22,8 @@ export function cacheMiddleware(options: CacheMiddlewareOptions) {
     try {
       const entry = await cacheService.get(key);
 
-      if (entry) {
-        const isStale = cacheService.isStale(entry, options.ttl);
-        res.set('X-Cache', isStale ? 'STALE' : 'HIT');
+      if (entry && !cacheService.isStale(entry, options.ttl)) {
+        res.set('X-Cache', 'HIT');
         res.set('X-Cache-Key', key);
         return res.json(entry.data);
       }

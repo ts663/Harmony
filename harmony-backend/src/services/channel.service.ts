@@ -72,15 +72,12 @@ export const channelService = {
       data: { serverId, name, slug, type, visibility, topic, position },
     });
 
-    // Write-through: invalidate server channel lists and cache new visibility
-    await Promise.all([
-      cacheService.invalidatePattern(`channel:msgs:${channel.id}:*`),
-      cacheService.set(
-        CacheKeys.channelVisibility(channel.id),
-        channel.visibility,
-        { ttl: CacheTTL.channelVisibility },
-      ),
-    ]);
+    // Write-through: cache new visibility (best-effort, don't fail the mutation)
+    cacheService.set(
+      CacheKeys.channelVisibility(channel.id),
+      channel.visibility,
+      { ttl: CacheTTL.channelVisibility },
+    ).catch(() => {});
 
     return channel;
   },
@@ -100,11 +97,8 @@ export const channelService = {
       },
     });
 
-    // Write-through: invalidate caches related to this channel
-    await Promise.all([
-      cacheService.invalidate(CacheKeys.channelVisibility(channelId)),
-      cacheService.invalidatePattern(`channel:msgs:${channelId}:*`),
-    ]);
+    // Write-through: invalidate message caches (best-effort)
+    cacheService.invalidatePattern(`channel:msgs:${channelId}:*`).catch(() => {});
 
     return updated;
   },
@@ -117,11 +111,9 @@ export const channelService = {
 
     await prisma.channel.delete({ where: { id: channelId } });
 
-    // Write-through: invalidate all caches for deleted channel
-    await Promise.all([
-      cacheService.invalidate(CacheKeys.channelVisibility(channelId)),
-      cacheService.invalidatePattern(`channel:msgs:${channelId}:*`),
-    ]);
+    // Write-through: invalidate all caches for deleted channel (best-effort)
+    cacheService.invalidate(CacheKeys.channelVisibility(channelId)).catch(() => {});
+    cacheService.invalidatePattern(`channel:msgs:${channelId}:*`).catch(() => {});
   },
 
   async createDefaultChannel(serverId: string) {
