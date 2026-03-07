@@ -1,6 +1,7 @@
 import { initTRPC, TRPCError } from '@trpc/server';
 import type { Request } from 'express';
 import { authService } from '../services/auth.service';
+import { permissionService, type Action } from '../services/permission.service';
 
 export interface TRPCContext {
   userId: string | null;
@@ -38,3 +39,27 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
   }
   return next({ ctx: { ...ctx, userId: ctx.userId } });
 });
+
+/**
+ * Returns a procedure that requires the caller to hold the given `action`
+ * permission inside the server identified by `input.serverId`.
+ *
+ * Usage:
+ *   withPermission('channel:create')
+ *     .input(z.object({ serverId: z.string().uuid(), ... }))
+ *     .mutation(...)
+ *
+ * The input schema MUST include `serverId: string` (UUID).
+ */
+export function withPermission(action: Action) {
+  return authedProcedure.use(async ({ ctx, getRawInput, next }) => {
+    const raw = await getRawInput();
+    const input = raw as { serverId?: string };
+    const serverId = input?.serverId;
+    if (!serverId) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'serverId is required for permission checks' });
+    }
+    await permissionService.requirePermission(ctx.userId, serverId, action);
+    return next();
+  });
+}
