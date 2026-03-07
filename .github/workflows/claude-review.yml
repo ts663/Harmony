@@ -3,7 +3,12 @@ name: Claude PR Review
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
-
+    paths:
+      - "harmony-backend/src/**"
+      - "harmony-backend/tests/**"
+      - "harmony-backend/prisma/**"
+      - "harmony-frontend/src/**"
+      - "docs/**"
 jobs:
   review:
     runs-on: ubuntu-latest
