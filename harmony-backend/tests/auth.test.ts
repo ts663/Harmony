@@ -237,10 +237,10 @@ describe('POST /api/auth/refresh', () => {
   });
 });
 
-// ─── requireAuth middleware ───────────────────────────────────────────────────
+// ─── tRPC health endpoint with auth header ───────────────────────────────────
 
-describe('requireAuth middleware (via tRPC health check)', () => {
-  it('allows a request with a valid Bearer token to reach tRPC', async () => {
+describe('tRPC health check with Bearer token', () => {
+  it('returns 200 for /trpc/health with a valid Bearer token', async () => {
     // Login to get an access token
     mockPrisma.user.findUnique.mockResolvedValue(mockUser);
     mockPrisma.refreshToken.create.mockResolvedValue(mockRefreshToken);

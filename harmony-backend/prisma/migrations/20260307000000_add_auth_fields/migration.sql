@@ -1,14 +1,20 @@
 -- Migration: add_auth_fields
 -- Adds email + password_hash to users table and creates refresh_tokens table.
 
--- Add email column (unique, not null) with a temporary default so existing rows are valid
+-- Ensure pgcrypto is available for gen_random_uuid() on Postgres < 13
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Add columns as nullable first so existing rows don't violate NOT NULL
 ALTER TABLE "users"
-  ADD COLUMN "email" VARCHAR(254) NOT NULL DEFAULT '',
+  ADD COLUMN "email" VARCHAR(254),
   ADD COLUMN "password_hash" VARCHAR(72) NOT NULL DEFAULT '';
 
--- Remove the temporary defaults (new rows must supply values)
+-- Backfill unique placeholder emails for any pre-existing rows
+UPDATE "users" SET "email" = 'placeholder-' || id || '@invalid.local' WHERE "email" IS NULL;
+
+-- Now enforce NOT NULL and drop the password_hash default
 ALTER TABLE "users"
-  ALTER COLUMN "email" DROP DEFAULT,
+  ALTER COLUMN "email" SET NOT NULL,
   ALTER COLUMN "password_hash" DROP DEFAULT;
 
 -- Unique index on email

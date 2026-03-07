@@ -5,10 +5,36 @@ import { prisma } from '../db/prisma';
 import { TRPCError } from '@trpc/server';
 
 const BCRYPT_ROUNDS = 12;
-const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-in-prod';
-const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET ?? 'dev-refresh-secret-change-in-prod';
+
+const ACCESS_SECRET = (() => {
+  const value = process.env.JWT_ACCESS_SECRET;
+  if (!value && process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_ACCESS_SECRET environment variable is not set');
+  }
+  return value ?? 'dev-access-secret-change-in-prod';
+})();
+
+const REFRESH_SECRET = (() => {
+  const value = process.env.JWT_REFRESH_SECRET;
+  if (!value && process.env.NODE_ENV === 'production') {
+    throw new Error('JWT_REFRESH_SECRET environment variable is not set');
+  }
+  return value ?? 'dev-refresh-secret-change-in-prod';
+})();
+
 const ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN ?? '15m';
-const REFRESH_EXPIRES_IN_DAYS = Number(process.env.JWT_REFRESH_EXPIRES_DAYS ?? '7');
+
+const REFRESH_EXPIRES_IN_DAYS: number = (() => {
+  const raw = process.env.JWT_REFRESH_EXPIRES_DAYS;
+  if (raw === undefined) return 7;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(
+      `Invalid JWT_REFRESH_EXPIRES_DAYS value "${raw}". Expected a positive number.`,
+    );
+  }
+  return parsed;
+})();
 
 export interface AuthTokens {
   accessToken: string;
@@ -17,6 +43,7 @@ export interface AuthTokens {
 
 export interface JwtPayload {
   sub: string; // userId
+  jti?: string; // unique token ID (present on refresh tokens)
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -28,7 +55,7 @@ function signAccessToken(userId: string): string {
 }
 
 function signRefreshToken(userId: string): string {
-  return jwt.sign({ sub: userId } as JwtPayload, REFRESH_SECRET, {
+  return jwt.sign({ sub: userId, jti: crypto.randomUUID() } as JwtPayload, REFRESH_SECRET, {
     expiresIn: `${REFRESH_EXPIRES_IN_DAYS}d` as jwt.SignOptions['expiresIn'],
   });
 }
