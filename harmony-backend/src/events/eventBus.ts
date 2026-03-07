@@ -29,6 +29,15 @@ let subscriberClient: Redis | null = null;
 // the last handler for a given channel is removed.
 const channelHandlerCounts = new Map<string, number>();
 
+// Per-channel ready promise — resolves when Redis confirms the subscription.
+// All subscribers on the same channel share this promise so latecomers don't
+// get a false-immediate-ready before the handshake completes.
+const channelReadyPromises = new Map<string, Promise<void>>();
+
+// How long to wait for a Redis subscribe handshake before giving up.
+// Resolves (not rejects) so callers never hang — subscription may succeed later.
+const SUBSCRIBE_TIMEOUT_MS = 5000;
+
 function getSubscriberClient(): Redis {
   if (!subscriberClient) {
     subscriberClient = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
@@ -56,15 +65,18 @@ export const eventBus = {
   },
 
   /**
-   * Subscribe to a typed event channel. Returns an unsubscribe function.
+   * Subscribe to a typed event channel.
+   * Returns `{ unsubscribe, ready }`:
+   *   - `unsubscribe()` removes this handler (and unsubscribes at the Redis level
+   *     when the last handler for the channel is removed).
+   *   - `ready` is a Promise that resolves when the Redis subscribe handshake
+   *     completes, so callers can await it before publishing test messages.
    * Safe to call multiple times — each call registers an additional handler.
-   * Unsubscribes at the Redis level only when the last handler for that
-   * specific channel is removed.
    */
   subscribe<C extends EventChannelName>(
     channel: C,
     handler: EventHandler<C>,
-  ): () => void {
+  ): { unsubscribe: () => void; ready: Promise<void> } {
     const client = getSubscriberClient();
 
     const messageListener = (ch: string, message: string) => {
@@ -80,26 +92,46 @@ export const eventBus = {
     const prevCount = channelHandlerCounts.get(channel) ?? 0;
     channelHandlerCounts.set(channel, prevCount + 1);
 
-    // Only issue SUBSCRIBE to Redis when this is the first handler for the channel
+    let ready: Promise<void>;
     if (prevCount === 0) {
-      client.subscribe(channel, (err) => {
-        if (err) console.error(`[EventBus] Failed to subscribe to ${channel}:`, err);
+      // First subscriber — issue SUBSCRIBE and store the in-flight handshake promise
+      // so subsequent subscribers on the same channel wait for the same confirmation.
+      const handshake = new Promise<void>((resolve) => {
+        client.subscribe(channel, (err) => {
+          if (err) console.error(`[EventBus] Failed to subscribe to ${channel}:`, err);
+          resolve(); // resolve even on error so callers never hang
+        });
       });
+      // Race the handshake against a fallback timeout so callers don't block forever
+      // if Redis is temporarily unavailable (subscription may succeed after reconnect).
+      ready = Promise.race([
+        handshake,
+        new Promise<void>((resolve) => setTimeout(resolve, SUBSCRIBE_TIMEOUT_MS)),
+      ]);
+      channelReadyPromises.set(channel, ready);
+    } else {
+      // Subsequent subscribers share the same in-flight promise so they wait until
+      // Redis actually confirms the subscription rather than resolving immediately.
+      ready = channelReadyPromises.get(channel) ?? Promise.resolve();
     }
     client.on('message', messageListener);
 
-    return () => {
-      client.removeListener('message', messageListener);
+    return {
+      unsubscribe: () => {
+        client.removeListener('message', messageListener);
 
-      const count = (channelHandlerCounts.get(channel) ?? 1) - 1;
-      if (count <= 0) {
-        channelHandlerCounts.delete(channel);
-        client.unsubscribe(channel).catch((err) =>
-          console.error(`[EventBus] Failed to unsubscribe from ${channel}:`, err),
-        );
-      } else {
-        channelHandlerCounts.set(channel, count);
-      }
+        const count = (channelHandlerCounts.get(channel) ?? 1) - 1;
+        if (count <= 0) {
+          channelHandlerCounts.delete(channel);
+          channelReadyPromises.delete(channel);
+          client.unsubscribe(channel).catch((err) =>
+            console.error(`[EventBus] Failed to unsubscribe from ${channel}:`, err),
+          );
+        } else {
+          channelHandlerCounts.set(channel, count);
+        }
+      },
+      ready,
     };
   },
 
@@ -109,6 +141,7 @@ export const eventBus = {
       await subscriberClient.quit().catch(() => {});
       subscriberClient = null;
       channelHandlerCounts.clear();
+      channelReadyPromises.clear();
     }
   },
 };

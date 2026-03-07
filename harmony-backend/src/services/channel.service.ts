@@ -3,8 +3,6 @@ import { ChannelType, ChannelVisibility } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { cacheService, CacheKeys, CacheTTL, sanitizeKeySegment } from './cache.service';
 
-export { SetVisibilityInput, VisibilityChangeResult } from './visibility.service';
-
 export interface CreateChannelInput {
   serverId: string;
   name: string;

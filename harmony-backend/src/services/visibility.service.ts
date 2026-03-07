@@ -33,6 +33,11 @@ export const visibilityService = {
   /**
    * Change a channel's visibility.
    *
+   * TODO (M-B3 / CL-C-B3.2): Before applying the change, call
+   *   `PermissionService.canManageChannel(actorId, channelId)`
+   * per §6.3 / §3.5. PermissionService is a future M-B3 deliverable; until it
+   * exists, callers (tRPC procedures) are responsible for access control.
+   *
    * The VOICE type check, channel UPDATE, and audit log INSERT are all
    * performed inside a single $transaction to eliminate the extra pre-
    * transaction DB round-trip and ensure all reads are consistent.

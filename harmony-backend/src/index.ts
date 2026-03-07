@@ -9,7 +9,7 @@ const server = app.listen(PORT, () => {
   console.log(`Harmony backend running on http://localhost:${PORT}`);
 });
 
-cacheInvalidator.start();
+cacheInvalidator.start().catch((err) => console.error('[cacheInvalidator] start failed:', err));
 
 const shutdown = async () => {
   const timer = setTimeout(() => process.exit(1), 10_000);
