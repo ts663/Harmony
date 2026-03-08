@@ -113,54 +113,29 @@ describe('tokenBucketRateLimiter — human users', () => {
   });
 });
 
-describe('tokenBucketRateLimiter — verified bots', () => {
+describe('tokenBucketRateLimiter — bot UA requests (no elevated limits without reverse DNS)', () => {
   const GOOGLEBOT_UA = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
-  const BINGBOT_UA = 'Mozilla/5.0 (compatible; Bingbot/2.0; +http://www.bing.com/bingbot.htm)';
 
-  it('grants Googlebot the 1000 req/min capacity', async () => {
+  it('applies human rate limit to bot UAs until reverse-DNS verification is implemented', async () => {
     const app = createTestApp();
     const res = await request(app).get('/test').set('User-Agent', GOOGLEBOT_UA);
     expect(res.status).toBe(200);
-    expect(res.headers['ratelimit-limit']).toBe('1000');
+    // Bot UA should get the human limit (100), not the bot limit (1000)
+    expect(res.headers['ratelimit-limit']).toBe('100');
   });
 
-  it('grants Bingbot the 1000 req/min capacity', async () => {
-    const app = createTestApp();
-    const res = await request(app).get('/test').set('User-Agent', BINGBOT_UA);
-    expect(res.status).toBe(200);
-    expect(res.headers['ratelimit-limit']).toBe('1000');
-  });
-
-  it('allows Googlebot through while a human IP is rate-limited', async () => {
+  it('rate-limits bot UA at 100 req/min same as human users', async () => {
     const app = createTestApp();
     const ip = '9.9.9.9';
 
-    // Exhaust human budget
+    // Exhaust the 100-token human budget using a bot UA
     for (let i = 0; i < 100; i++) {
-      await request(app).get('/test').set('X-Forwarded-For', ip);
+      await request(app).get('/test').set('X-Forwarded-For', ip).set('User-Agent', GOOGLEBOT_UA);
     }
-    const humanBlocked = await request(app).get('/test').set('X-Forwarded-For', ip);
-    expect(humanBlocked.status).toBe(429);
 
-    // Googlebot from the same IP should still succeed (different bucket key)
-    const botRes = await request(app).get('/test').set('User-Agent', GOOGLEBOT_UA);
-    expect(botRes.status).toBe(200);
-  });
-
-  it('decrements bot tokens on consecutive requests', async () => {
-    const app = createTestApp();
-
-    // Verify the first request starts at capacity 1000
-    const first = await request(app).get('/test').set('User-Agent', GOOGLEBOT_UA);
-    expect(first.status).toBe(200);
-    expect(first.headers['ratelimit-limit']).toBe('1000');
-    const remaining = Number(first.headers['ratelimit-remaining']);
-    expect(remaining).toBe(999);
-
-    // Send a second request and verify decrement
-    const second = await request(app).get('/test').set('User-Agent', GOOGLEBOT_UA);
-    expect(second.status).toBe(200);
-    expect(Number(second.headers['ratelimit-remaining'])).toBe(remaining - 1);
+    // 101st request should be rate-limited even with bot UA
+    const res = await request(app).get('/test').set('X-Forwarded-For', ip).set('User-Agent', GOOGLEBOT_UA);
+    expect(res.status).toBe(429);
   });
 });
 

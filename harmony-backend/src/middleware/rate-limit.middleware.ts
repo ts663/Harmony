@@ -110,21 +110,21 @@ function consumeToken(bucket: TokenBucket): void {
  * Uses a true token-bucket algorithm: tokens refill continuously at a rate of
  * `capacity / WINDOW_MS` tokens per millisecond, up to the maximum capacity.
  *
- * Limits:
- *   - Verified bots (Googlebot, Bingbot, Slackbot): 1000 req/min per bot name
- *   - Human users / other clients:                    100 req/min per IP
+ * All requests are currently rate-limited at 100 req/min per IP. Bot detection
+ * identifies crawlers (Googlebot, Bingbot, Slackbot) but does NOT grant
+ * elevated limits until reverse-DNS verification is implemented per §9.3.
+ * Without verification, any client can spoof a bot UA to bypass limits.
  *
  * Responses:
  *   - 429 Too Many Requests + Retry-After header when limit is exceeded
  *   - RateLimit-Limit / RateLimit-Remaining / RateLimit-Reset on every response
  */
 export function tokenBucketRateLimiter(req: Request, res: Response, next: NextFunction): void {
-  const userAgent = req.headers['user-agent'];
-  const botName = detectVerifiedBot(userAgent);
-
-  // Bot key uses the normalized bot name (bounded set); human key uses IP
-  const key = botName ? `bot:${botName}` : `ip:${req.ip ?? 'unknown'}`;
-  const capacity = botName ? BOT_CAPACITY : HUMAN_CAPACITY;
+  // All requests use the human bucket (per-IP, 100 req/min) until reverse-DNS
+  // bot verification is implemented. Bot UA detection is preserved for logging
+  // and future use but does not grant elevated limits.
+  const key = `ip:${req.ip ?? 'unknown'}`;
+  const capacity = HUMAN_CAPACITY;
 
   const bucket = getOrRefillBucket(key, capacity);
   const msPerToken = WINDOW_MS / capacity;
