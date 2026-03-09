@@ -4,19 +4,22 @@ import { cookies } from 'next/headers';
 
 /**
  * Cookie name used for auth session.
- * The middleware reads this cookie to determine authentication state.
+ * Must stay in sync with the local constant in middleware.ts.
  *
  * NOTE: When issue #113 (real backend JWT auth) is merged, this server action
  * will be replaced by the backend setting an httpOnly cookie directly via
- * Set-Cookie on the /api/auth/login response. The cookie name must stay in sync
- * with middleware.ts.
+ * Set-Cookie on the /api/auth/login response.
+ *
+ * Not exported — 'use server' files may only export async functions.
+ * middleware.ts maintains its own copy of this constant.
  */
-export const AUTH_COOKIE_NAME = 'auth_token';
+const AUTH_COOKIE_NAME = 'auth_token';
 
 /** Maximum cookie age: 7 days (matches backend refresh token TTL). */
 const MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 
-export interface SessionPayload {
+/** Shape of the session payload encoded in the auth cookie. */
+interface SessionPayload {
   sub: string;
   username: string;
   role: string;
