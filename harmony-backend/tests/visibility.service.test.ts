@@ -12,7 +12,7 @@
 import { ChannelVisibility, ChannelType } from '@prisma/client';
 import { TRPCError } from '@trpc/server';
 import { visibilityService, SetVisibilityInput } from '../src/services/visibility.service';
-import { eventBus, EventChannels } from '../src/events/eventBus';
+import { eventBus, EventChannels, VisibilityChangedPayload } from '../src/events/eventBus';
 import { prisma } from '../src/db/prisma';
 
 let serverId: string;
@@ -357,10 +357,23 @@ describe('visibilityService.setVisibility — VISIBILITY_CHANGED event', () => {
       data: { visibility: ChannelVisibility.PRIVATE, indexedAt: null },
     });
 
+    // Collect all received payloads. Expose a Promise that resolves as soon
+    // as the subscription callback delivers a payload for our target channel,
+    // eliminating the timing-dependent setTimeout wait.
     const receivedPayloads: unknown[] = [];
+    let resolveOnEvent!: (p: VisibilityChangedPayload) => void;
+    const eventReceived = new Promise<VisibilityChangedPayload>(
+      (resolve) => { resolveOnEvent = resolve; },
+    );
+
     const { unsubscribe, ready } = eventBus.subscribe(
       EventChannels.VISIBILITY_CHANGED,
-      (payload) => receivedPayloads.push(payload),
+      (payload) => {
+        receivedPayloads.push(payload);
+        if (payload.channelId === textChannelId) {
+          resolveOnEvent(payload);
+        }
+      },
     );
 
     await ready;
@@ -369,18 +382,14 @@ describe('visibilityService.setVisibility — VISIBILITY_CHANGED event', () => {
       makeInput(textChannelId, ChannelVisibility.PUBLIC_INDEXABLE),
     );
 
-    // Give Redis Pub/Sub a moment to deliver
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    // Wait for the callback to fire rather than using a fixed timeout
+    const payload = await eventReceived;
 
     expect(receivedPayloads.length).toBeGreaterThanOrEqual(1);
-    const payload = (receivedPayloads as Record<string, unknown>[]).find(
-      (p) => p.channelId === textChannelId,
-    );
-    expect(payload).toBeDefined();
-    expect(payload!.channelId).toBe(textChannelId);
-    expect(payload!.oldVisibility).toBe(ChannelVisibility.PRIVATE);
-    expect(payload!.newVisibility).toBe(ChannelVisibility.PUBLIC_INDEXABLE);
-    expect(payload!.actorId).toBe(userId);
+    expect(payload.channelId).toBe(textChannelId);
+    expect(payload.oldVisibility).toBe(ChannelVisibility.PRIVATE);
+    expect(payload.newVisibility).toBe(ChannelVisibility.PUBLIC_INDEXABLE);
+    expect(payload.actorId).toBe(userId);
 
     unsubscribe();
   });
