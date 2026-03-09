@@ -118,6 +118,10 @@ export const serverService = {
   },
 
   async decrementMemberCount(id: string): Promise<Server> {
+    const server = await prisma.server.findUnique({ where: { id } });
+    if (!server || server.memberCount <= 0) {
+      throw new TRPCError({ code: 'BAD_REQUEST', message: 'Member count is already zero' });
+    }
     return prisma.server.update({
       where: { id },
       data: { memberCount: { decrement: 1 } },

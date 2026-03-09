@@ -64,6 +64,13 @@ describe('serverService (integration)', () => {
       },
     });
     otherUserId = other.id;
+
+    const server = await serverService.createServer({
+      name: 'My Test Server',
+      ownerId: ownerUserId,
+      isPublic: true,
+    });
+    createdServerId = server.id;
   });
 
   afterAll(async () => {
@@ -80,20 +87,14 @@ describe('serverService (integration)', () => {
   });
 
 describe('serverService.createServer', () => {
-  it('creates a server and auto-generates a slug', async () => {
-    const server = await serverService.createServer({
-      name: 'My Test Server',
-      ownerId: ownerUserId,
-      isPublic: true,
-    });
-    createdServerId = server.id;
-
-    expect(server.id).toBeTruthy();
-    expect(server.name).toBe('My Test Server');
-    expect(server.slug).toBe('my-test-server');
-    expect(server.ownerId).toBe(ownerUserId);
-    expect(server.isPublic).toBe(true);
-    expect(server.memberCount).toBe(0);
+  it('created a server with auto-generated slug in beforeAll', async () => {
+    const server = await prisma.server.findUnique({ where: { id: createdServerId } });
+    expect(server).not.toBeNull();
+    expect(server!.name).toBe('My Test Server');
+    expect(server!.slug).toBe('my-test-server');
+    expect(server!.ownerId).toBe(ownerUserId);
+    expect(server!.isPublic).toBe(true);
+    expect(server!.memberCount).toBe(0);
   });
 
   it('rejects a name that generates an empty slug', async () => {
@@ -175,6 +176,12 @@ describe('serverService.incrementMemberCount / decrementMemberCount', () => {
   it('decrements member count', async () => {
     const updated = await serverService.decrementMemberCount(createdServerId);
     expect(updated.memberCount).toBe(0);
+  });
+
+  it('throws BAD_REQUEST when decrementing at zero', async () => {
+    await expect(
+      serverService.decrementMemberCount(createdServerId),
+    ).rejects.toThrow(TRPCError);
   });
 });
 
