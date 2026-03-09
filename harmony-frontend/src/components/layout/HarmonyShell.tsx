@@ -61,9 +61,13 @@ export function HarmonyShell({
   members,
   basePath = '/c',
 }: HarmonyShellProps) {
-  const [isMembersOpen, setIsMembersOpen] = useState(() =>
-    typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches,
-  );
+  const [isMembersOpen, setIsMembersOpen] = useState(false);
+
+  // Sync initial members panel state to viewport width after hydration.
+  // Must run client-side only to avoid SSR/client HTML mismatch.
+  useEffect(() => {
+    setIsMembersOpen(window.matchMedia('(min-width: 640px)').matches);
+  }, []);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   // #c25: track mobile channel-sidebar state so aria-expanded on hamburger reflects reality
   const [isMenuOpen, setIsMenuOpen] = useState(false);
