@@ -11,8 +11,8 @@ export interface AuthContextValue {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  register: (username: string, displayName: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
+  register: (email: string, username: string, displayName: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (patch: Partial<Pick<User, 'displayName' | 'status'>>) => Promise<void>;
   isAdmin: () => boolean;
@@ -22,80 +22,49 @@ export interface AuthContextValue {
 
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const AUTH_STORAGE_KEY = 'harmony_auth_user';
-
-const VALID_STATUSES = ['online', 'idle', 'dnd', 'offline'];
-const VALID_ROLES = ['owner', 'admin', 'moderator', 'member', 'guest'];
-
-/** Runtime check that parsed JSON has the required User shape and valid enum values. */
-function isValidUser(value: unknown): value is User {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  return (
-    typeof obj.id === 'string' &&
-    typeof obj.username === 'string' &&
-    typeof obj.status === 'string' &&
-    VALID_STATUSES.includes(obj.status) &&
-    typeof obj.role === 'string' &&
-    VALID_ROLES.includes(obj.role)
-  );
-}
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore persisted auth state on mount and sync authService
+  // On mount: try to restore session via the refresh token (if present).
+  // The api-client will transparently use the stored refresh token to get
+  // a fresh access token if needed.
   useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem(AUTH_STORAGE_KEY);
-      if (stored) {
-        const parsed: unknown = JSON.parse(stored);
-        if (isValidUser(parsed)) {
-          setUser(parsed);
-          authService.setCurrentUser(parsed);
-        } else {
-          sessionStorage.removeItem(AUTH_STORAGE_KEY);
-        }
-      }
-    } catch {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY);
-    } finally {
-      setIsLoading(false);
-    }
+    authService
+      .getCurrentUser()
+      .then(restored => {
+        if (restored) setUser(restored);
+      })
+      .catch(() => {
+        // No valid session — stay logged out
+      })
+      .finally(() => setIsLoading(false));
   }, []);
 
-  const login = useCallback(async (username: string, password: string) => {
-    const loggedInUser = await authService.login(username, password);
+  const login = useCallback(async (email: string, password: string) => {
+    const loggedInUser = await authService.login(email, password);
     setUser(loggedInUser);
-    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(loggedInUser));
   }, []);
 
-  const register = useCallback(async (username: string, displayName: string, password: string) => {
-    const newUser = await authService.register(username, displayName, password);
-    setUser(newUser);
-    sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(newUser));
-  }, []);
+  const register = useCallback(
+    async (email: string, username: string, displayName: string, password: string) => {
+      const newUser = await authService.register(email, username, displayName, password);
+      setUser(newUser);
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await authService.logout();
     setUser(null);
-    sessionStorage.removeItem(AUTH_STORAGE_KEY);
   }, []);
 
-  // Empty deps is intentional: authService.updateCurrentUser operates on the
-  // service's own in-memory currentUser (not the React `user` state), so this
-  // callback never reads `user` from the closure. If the service and React state
-  // were ever decoupled, the guard inside authService would surface the bug.
   const updateUser = useCallback(
     async (patch: Partial<Pick<User, 'displayName' | 'status'>>) => {
       const updated = await authService.updateCurrentUser(patch);
       setUser(updated);
-      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
     },
     [],
   );
@@ -117,3 +86,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
+
