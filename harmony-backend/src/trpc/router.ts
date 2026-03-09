@@ -1,6 +1,7 @@
 import { router, publicProcedure } from './init';
 import { channelRouter } from './routers/channel.router';
 import { serverRouter } from './routers/server.router';
+import { messageRouter } from './routers/message.router';
 import { userRouter } from './routers/user.router';
 
 export const appRouter = router({
@@ -9,6 +10,7 @@ export const appRouter = router({
   }),
   channel: channelRouter,
   server: serverRouter,
+  message: messageRouter,
   user: userRouter,
 });
 

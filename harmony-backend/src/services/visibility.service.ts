@@ -1,6 +1,10 @@
 /**
- * ChannelVisibilityService (M-B3) — owns the visibility state machine,
- * permission checks, and audit logging for channel visibility changes.
+ * ChannelVisibilityService (M-B3) — owns the visibility state machine
+ * and audit logging for channel visibility changes.
+ *
+ * Authorization is handled at the router level via `withPermission`
+ * middleware (RBAC from PR #141). This service no longer performs its
+ * own permission checks.
  *
  * Per §6.3: the channel UPDATE and audit log INSERT are wrapped in a single
  * Prisma $transaction. After a successful commit, a VISIBILITY_CHANGED event
@@ -15,6 +19,7 @@ import { eventBus, EventChannels } from '../events/eventBus';
 
 export interface SetVisibilityInput {
   channelId: string;
+  serverId: string;
   visibility: ChannelVisibility;
   actorId: string;
   ip: string;
@@ -31,25 +36,40 @@ export interface VisibilityChangeResult {
 
 export const visibilityService = {
   /**
+   * Get the current visibility of a channel.
+   *
+   * Validates that the channel belongs to the given server to prevent
+   * cross-server channel probing.
+   */
+  async getVisibility(channelId: string, serverId: string): Promise<ChannelVisibility> {
+    const channel = await prisma.channel.findUnique({
+      where: { id: channelId },
+      select: { visibility: true, serverId: true },
+    });
+    if (!channel || channel.serverId !== serverId) {
+      throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
+    }
+    return channel.visibility;
+  },
+
+  /**
    * Change a channel's visibility.
    *
-   * TODO (M-B3 / CL-C-B3.2): Before applying the change, call
-   *   `PermissionService.canManageChannel(actorId, channelId)`
-   * per §6.3 / §3.5. PermissionService is a future M-B3 deliverable; until it
-   * exists, callers (tRPC procedures) are responsible for access control.
-   *
-   * The VOICE type check, channel UPDATE, and audit log INSERT are all
-   * performed inside a single $transaction to eliminate the extra pre-
-   * transaction DB round-trip and ensure all reads are consistent.
+   * Verifies the channel belongs to `serverId` before applying the change,
+   * preventing cross-server authorization bypass. The VOICE type check,
+   * channel UPDATE, and audit log INSERT are all performed inside a single
+   * $transaction to ensure consistency.
    */
   async setVisibility(input: SetVisibilityInput): Promise<VisibilityChangeResult> {
-    const { channelId, visibility, actorId, ip, userAgent = '' } = input;
+    const { channelId, serverId, visibility, actorId, ip, userAgent = '' } = input;
 
     // Atomic DB write: read current state inside the transaction to avoid a
     // race where two concurrent calls record stale oldVisibility.
     const { updatedChannel, auditEntry, oldVisibility } = await prisma.$transaction(async (tx) => {
       const current = await tx.channel.findUnique({ where: { id: channelId } });
-      if (!current) throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found' });
+      if (!current || current.serverId !== serverId) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Channel not found in this server' });
+      }
 
       // VOICE channels cannot be made PUBLIC_INDEXABLE
       if (current.type === ChannelType.VOICE && visibility === ChannelVisibility.PUBLIC_INDEXABLE) {
@@ -66,6 +86,9 @@ export const visibilityService = {
           // §6.3: set indexedAt only when transitioning TO PUBLIC_INDEXABLE (not on no-op updates)
           ...(visibility === ChannelVisibility.PUBLIC_INDEXABLE &&
             current.visibility !== ChannelVisibility.PUBLIC_INDEXABLE && { indexedAt: new Date() }),
+          // §5.2: clear indexedAt when transitioning TO PRIVATE
+          ...(visibility === ChannelVisibility.PRIVATE &&
+            current.visibility !== ChannelVisibility.PRIVATE && { indexedAt: null }),
         },
       });
 
