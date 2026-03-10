@@ -6,9 +6,7 @@
  */
 
 import { notFound } from 'next/navigation';
-import { getServer } from '@/services/serverService';
-import { getChannel } from '@/services/channelService';
-import { getMessages } from '@/services/messageService';
+import { fetchPublicServer, fetchPublicChannel, fetchPublicMessages } from '@/services/publicApiService';
 import { AuthRedirect } from '@/components/channel/AuthRedirect';
 import { VisibilityGuard } from '@/components/channel/VisibilityGuard';
 import { MessageList } from '@/components/channel/MessageList';
@@ -84,16 +82,27 @@ interface GuestChannelViewProps {
 }
 
 export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannelViewProps) {
-  const [server, channel] = await Promise.all([
-    getServer(serverSlug),
-    getChannel(serverSlug, channelSlug),
+  const [server, channelResult] = await Promise.all([
+    fetchPublicServer(serverSlug),
+    fetchPublicChannel(serverSlug, channelSlug),
   ]);
-  if (!server || !channel) notFound();
 
-  const isPrivate = channel.visibility === ChannelVisibility.PRIVATE;
-  const { messages } = isPrivate
-    ? { messages: [] }
-    : await getMessages(channel.id);
+  if (!server || !channelResult) notFound();
+
+  if (channelResult.isPrivate) {
+    return (
+      <div className='flex h-screen flex-col overflow-hidden bg-[#36393f] font-sans'>
+        <AuthRedirect to={`/channels/${serverSlug}/${channelSlug}`} />
+        <GuestHeader server={server} memberCount={server.memberCount ?? 0} />
+        <VisibilityGuard visibility={ChannelVisibility.PRIVATE} isLoading={false}>
+          {null}
+        </VisibilityGuard>
+      </div>
+    );
+  }
+
+  const { channel } = channelResult;
+  const { messages } = await fetchPublicMessages(channel.id);
   const sortedMessages = [...messages].reverse();
   const memberCount = server.memberCount ?? 0;
 
