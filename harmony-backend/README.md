@@ -39,8 +39,9 @@ cp .env.example .env
 # Open .env and set strong, unique values for:
 #   JWT_ACCESS_SECRET=<random string, 32+ chars>
 #   JWT_REFRESH_SECRET=<random string, 32+ chars>
-# The placeholder values in .env.example are insecure and will cause
-# a hard crash on startup if the JWT_ACCESS_SECRET variable is missing.
+# The placeholder values are insecure defaults: the server will start with them,
+# but anyone could forge tokens. The process hard-crashes on startup only if
+# either JWT_ACCESS_SECRET or JWT_REFRESH_SECRET is missing entirely.
 
 # 3. Apply migrations (once, and again after any schema change)
 npx prisma migrate deploy
@@ -50,7 +51,7 @@ npm test
 ```
 
 > **Why both Postgres and Redis?**
-> Redis is required for auth token storage, visibility caching, the Pub/Sub event bus, and guest sessions (see §4.4 and §6 of `docs/unified-backend-architecture.md`). Starting only Postgres will cause auth and all caching/event features to fail.
+> Redis is required for visibility caching and the Pub/Sub event bus (see §4.4 and §6 of `docs/unified-backend-architecture.md`). Starting only Postgres will disable caching and event-driven features that depend on Redis.
 
 ## Environment
 
@@ -58,4 +59,4 @@ Copy `.env.example` to `.env` and fill in values before running locally.
 
 Key variables: `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL`, `PORT` (default `4000`).
 
-> **Security:** `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` in `.env.example` are placeholder values that **must** be replaced with strong, unique secrets before running the server. Using the default placeholders allows anyone to forge authentication tokens.
+> **Security:** `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` in `.env.example` are insecure placeholder values. The server will start with them, but tokens can be forged. Replace them with strong, unique secrets before running the server.
