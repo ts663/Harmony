@@ -8,7 +8,7 @@
 import { cache } from 'react';
 import type { Server, Channel, Message } from '@/types';
 import { ChannelType, ChannelVisibility } from '@/types';
-import { API_CONFIG } from '@/lib/constants';
+import { API_CONFIG, CACHE_DURATION } from '@/lib/constants';
 
 type PublicServer = Omit<Server, 'ownerId'>;
 
@@ -122,7 +122,7 @@ export const fetchPublicChannel = cache(
     try {
       const res = await fetch(
         `${API_CONFIG.BASE_URL}/api/public/servers/${encodeURIComponent(serverSlug)}/channels/${encodeURIComponent(channelSlug)}`,
-        { next: { revalidate: 60 } },
+        { next: { revalidate: CACHE_DURATION.PUBLIC_API_REVALIDATE } },
       );
 
       if (res.status === 404) return null;
