@@ -28,14 +28,19 @@ npm run lint      # eslint src tests
 npm test          # jest
 ```
 
-## Setting Up Prisma Locally
+## Setting Up Locally
 
 ```bash
-# 1. Start Postgres (only needed once per machine session)
-docker compose up -d postgres
+# 1. Start all required services (Postgres + Redis)
+docker compose up -d
 
-# 2. Copy env (only once)
+# 2. Copy env (only once) — then edit JWT secrets before running!
 cp .env.example .env
+# Open .env and set strong, unique values for:
+#   JWT_ACCESS_SECRET=<random string, 32+ chars>
+#   JWT_REFRESH_SECRET=<random string, 32+ chars>
+# The placeholder values in .env.example are insecure and will cause
+# a hard crash on startup if the JWT_ACCESS_SECRET variable is missing.
 
 # 3. Apply migrations (once, and again after any schema change)
 npx prisma migrate deploy
@@ -44,8 +49,13 @@ npx prisma migrate deploy
 npm test
 ```
 
+> **Why both Postgres and Redis?**
+> Redis is required for auth token storage, visibility caching, the Pub/Sub event bus, and guest sessions (see §4.4 and §6 of `docs/unified-backend-architecture.md`). Starting only Postgres will cause auth and all caching/event features to fail.
+
 ## Environment
 
 Copy `.env.example` to `.env` and fill in values before running locally.
 
 Key variables: `DATABASE_URL`, `REDIS_URL`, `FRONTEND_URL`, `PORT` (default `4000`).
+
+> **Security:** `JWT_ACCESS_SECRET` and `JWT_REFRESH_SECRET` in `.env.example` are placeholder values that **must** be replaced with strong, unique secrets before running the server. Using the default placeholders allows anyone to forge authentication tokens.
