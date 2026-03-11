@@ -175,8 +175,7 @@ export function ChannelSidebar({
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
 
   const isAdmin =
-    isAuthenticated &&
-    (currentUser.role === 'owner' || currentUser.role === 'admin');
+    isAuthenticated && currentUser.id === server.ownerId;
 
   const textChannels = channels.filter(
     c =>
@@ -212,7 +211,7 @@ export function ChannelSidebar({
         {/* Server name header */}
         <div className='flex h-12 flex-shrink-0 items-center border-b border-black/20 px-4 font-semibold text-white shadow-sm'>
           <span className='truncate'>{server.name}</span>
-          {currentUser.role === 'owner' || currentUser.role === 'admin' ? (
+          {isAdmin ? (
             <Link
               href={`/settings/${server.slug}`}
               title='Server settings'

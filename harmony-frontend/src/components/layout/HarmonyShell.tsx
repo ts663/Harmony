@@ -200,7 +200,7 @@ export function HarmonyShell({
         <TopBar
           channel={currentChannel}
           serverSlug={currentServer.slug}
-          userRole={currentUser.role}
+          isAdmin={currentUser.id === currentServer.ownerId}
           isMembersOpen={isMembersOpen}
           onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
           onSearchOpen={() => setIsSearchOpen(true)}
