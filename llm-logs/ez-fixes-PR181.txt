@@ -1,0 +1,1567 @@
+ ▐▛███▜▌   Claude Code v2.1.72
+▝▜█████▛▘  Opus 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/dev/school/cs485/Harmony
+
+❯ Right now, when I try to open an instance of harmony I'm greeted with this    
+error page. What do I have to do to get it running properly                     
+  ⎿  [Image #1]
+  ⎿  [Image #2]
+
+⏺ Searched for 4 patterns, read 3 files (ctrl+o to expand)
+
+⏺ The issue is that the frontend is missing its .env file. There's a
+  .env.example but no actual .env.
+
+  Let me also check if you need to have the backend running.
+
+⏺ Searched for 1 pattern, read 3 files (ctrl+o to expand)
+
+⏺ Now I see the full picture. Here's what you need to do to get Harmony running:
+
+  1. Create the frontend .env file:
+  cp harmony-frontend/.env.example harmony-frontend/.env
+
+  2. Update the API URL — the backend runs on port 4000 (per backend .env), but
+  the frontend defaults to http://localhost:3001. Edit harmony-frontend/.env and
+   change:
+  NEXT_PUBLIC_API_URL=http://localhost:4000
+
+  3. Start the backend services — the backend needs PostgreSQL and Redis. Check
+  if you have a docker-compose file:
+
+⏺ Searched for 2 patterns, read 3 files (ctrl+o to expand)
+
+⏺ Here's the full startup sequence:
+
+  1. Create the frontend .env
+
+  cp harmony-frontend/.env.example harmony-frontend/.env
+  Then edit harmony-frontend/.env to set
+  NEXT_PUBLIC_API_URL=http://localhost:4000 (the backend runs on port 4000, not
+  3001).
+
+  2. Start Postgres + Redis (Docker)
+
+  cd harmony-backend && docker compose up -d
+
+  3. Run database migrations/setup
+
+  cd harmony-backend && npx prisma migrate dev
+  (Or npx prisma db push if there are no migrations yet.)
+
+  4. Start the backend
+
+  cd harmony-backend && npm run dev
+
+  5. Start the frontend (in a separate terminal)
+
+  cd harmony-frontend && npm run dev
+
+  The error you're seeing is the Next.js frontend trying to fetch from the
+  backend API at startup (server-side rendering), and failing because either:
+  - The NEXT_PUBLIC_API_URL env var isn't set (no .env file), so it falls back
+  to localhost:3001 which is wrong
+  - The backend isn't running on port 4000
+
+  Both need to be fixed. Want me to create the .env file for you?
+
+✻ Cooked for 43s
+
+❯ I was able to load the site, but now I am receiving this error when trying to 
+ create an account:                                                             
+  ⎿  [Image #3]
+
+⏺ The error is UNAUTHORIZED on server.getServers — meaning after account
+  creation, the auth token isn't being passed to the server-side tRPC call. Let
+  me trace the auth flow.
+
+⏺ Explore(Trace auth flow after signup)
+  ⎿  Done (29 tool uses · 56.3k tokens · 51s)
+  (ctrl+o to expand)
+
+⏺ The root cause is a token mismatch. After signup:
+
+  - The real JWT access token is stored in browser memory (JavaScript variable)
+  — works for client-side API calls
+  - The auth_token cookie gets a base64-encoded session payload {sub, username, 
+  role} — NOT the real JWT
+  - When the server component calls server.getServers, it reads the cookie and
+  sends that base64 payload as Bearer token → backend rejects it as invalid JWT
+  → 401
+
+  The fix: store the real JWT access token in the auth_token cookie instead of
+  the session payload.
+
+  Let me look at the relevant files to make the fix.
+
+⏺ Read 3 files (ctrl+o to expand)
+
+⏺ Now let me check how the auth service gets the access token so I can pass it
+  to the cookie.
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ The fix is clear. The code even has TODO comments about it (referencing issue
+  #113). I need to store the real JWT access token in the cookie instead of the
+  base64 session payload. The middleware already supports JWT format.
+
+⏺ Update(harmony-frontend/src/app/actions/session.ts)
+  ⎿  Added 6 lines, removed 16 lines
+       8  /** Maximum cookie age: 7 days (matches backend refresh token T
+          TL). */
+       9  const MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+      10  
+      11 -/** Shape of the session payload encoded in the auth cookie. */
+      12 -interface SessionPayload {                                     
+      13 -  sub: string;                                                 
+      14 -  username: string;                                            
+      15 -  role: string;                                                
+      16 -}                                                              
+      17 -                                                               
+      11  /**
+      12   * Sets the auth session cookie (httpOnly, SameSite=Lax).
+      13   *
+      21 - * Encodes `payload` as base64 JSON. This is intentionally NOT 
+         -signed — it is                                                 
+      22 - * used only for routing decisions in middleware. All real auth
+         -orization checks                                               
+      23 - * are enforced server-side by the backend on every API/tRPC ca
+         -ll.                                                            
+      24 - *                                                             
+      25 - * When real JWT auth lands (#113), swap the encoded payload fo
+         -r the raw JWT                                                  
+      26 - * access token received from the backend.                     
+      14 + * Stores the raw JWT access token so that server-side tRPC cal
+         +ls                                                             
+      15 + * (in trpc-client.ts) can forward it as a Bearer token to the 
+         +backend.                                                       
+      16 + * The middleware decodes the JWT payload for routing decisions
+         + only —                                                        
+      17 + * all real authorization is enforced by the backend on every A
+         +PI call.                                                       
+      18   */
+      28 -export async function setSessionCookie(payload: SessionPayload)
+         -: Promise<void> {                                              
+      29 -  const encoded = Buffer.from(JSON.stringify(payload)).toString
+         -('base64url');                                                 
+      19 +export async function setSessionCookie(accessToken: string): Pr
+         +omise<void> {                                                  
+      20    const cookieStore = await cookies();
+      31 -  cookieStore.set(AUTH_COOKIE_NAME, encoded, {                 
+      21 +  cookieStore.set(AUTH_COOKIE_NAME, accessToken, {             
+      22      httpOnly: true,
+      23      secure: process.env.NODE_ENV === 'production',
+      24      sameSite: 'lax',
+
+⏺ Now update AuthContext.tsx to pass the real access token instead of the
+  session payload.
+
+⏺ Update(harmony-frontend/src/context/AuthContext.tsx)
+  ⎿  Added 1 line
+       4  import type { ReactNode } from 'react';
+       5  import type { User } from '@/types';
+       6  import * as authService from '@/services/authService';
+       7 +import { getAccessToken } from '@/lib/api-client';             
+       8  import { setSessionCookie, clearSessionCookie } from '@/app/act
+          ions/session';
+       9  
+      10  // ─── Types ──────────────────────────────────────────────────
+          ──────────────────
+
+⏺ Update(harmony-frontend/src/context/AuthContext.tsx)
+  ⎿  Added 4 lines, removed 3 lines
+      47        .then(async restored => {
+      48          if (restored) {
+      49            setUser(restored);
+      50 -          // Re-set the httpOnly cookie so middleware can conti
+         -nue protecting                                                 
+      51 -          // routes without requiring a full re-login.         
+      52 -          await setSessionCookie({ sub: restored.id, username: 
+         -restored.username, role: restored.role });                     
+      50 +          // Re-set the httpOnly cookie with the current access
+         + token so                                                      
+      51 +          // server-side tRPC calls and middleware route protec
+         +tion stay active.                                              
+      52 +          const token = getAccessToken();                      
+      53 +          if (token) await setSessionCookie(token);            
+      54          }
+      55        })
+      56        .catch(() => {
+  ⎿  Found 4 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Good, the diagnostics show I still need to update the login and register
+  callbacks.
+
+⏺ Update(harmony-frontend/src/context/AuthContext.tsx)
+  ⎿  Added 2 lines, removed 4 lines
+      62    const login = useCallback(async (email: string, password: str
+          ing) => {
+      63      const loggedInUser = await authService.login(email, passwor
+          d);
+      64      setUser(loggedInUser);
+      65 -    // Set httpOnly session cookie so middleware can protect ro
+         -utes server-side.                                              
+      66 -    // When #113 lands with real JWT, this call is replaced by 
+         -the backend                                                    
+      67 -    // setting the cookie via Set-Cookie on the /api/auth/login
+         - response.                                                     
+      68 -    await setSessionCookie({ sub: loggedInUser.id, username: lo
+         -ggedInUser.username, role: loggedInUser.role });               
+      65 +    const token = getAccessToken();                            
+      66 +    if (token) await setSessionCookie(token);                  
+      67    }, []);
+      68  
+      69    const register = useCallback(
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/context/AuthContext.tsx)
+  ⎿  Added 2 lines, removed 1 line
+      70      async (email: string, username: string, displayName: string
+          , password: string) => {
+      71        const newUser = await authService.register(email, usernam
+          e, displayName, password);
+      72        setUser(newUser);
+      73 -      await setSessionCookie({ sub: newUser.id, username: newUs
+         -er.username, role: newUser.role });                            
+      73 +      const token = getAccessToken();                          
+      74 +      if (token) await setSessionCookie(token);                
+      75      },
+      76      [],
+      77    );
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ There's one more occurrence — I see it's on line 73. Let me check.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ The diagnostics must be stale — the code looks correct. Let me verify the
+  build compiles.
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | head -20)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ No TypeScript errors. The fix is clean. Here's what changed:
+
+  session.ts — setSessionCookie now accepts the raw JWT access token string
+  instead of a session payload object. No more base64 encoding.
+
+  AuthContext.tsx — After login, register, and session restore, the real JWT
+  access token (from getAccessToken()) is stored in the cookie instead of {sub, 
+  username, role}.
+
+  No changes needed to:
+  - middleware.ts — already handles JWT format (detects 3-segment tokens and
+  decodes the middle payload)
+  - trpc-client.ts — already reads the cookie and sends it as Bearer token
+
+  Now when server components call trpcQuery('server.getServers'), the real JWT
+  will be forwarded to the backend, and the 401 should be resolved. Restart your
+   dev server and try creating an account again.
+
+✻ Baked for 2m 24s
+
+❯ Still seeing this error in the frontend when trying to load the site while    
+logged in                                                                       
+⨯ Error: tRPC query error [channel.getChannels]: 403 — {"error":{"message":"You 
+ do not have permission to perform 'server:read' in this server","code":-32003, 
+"data":{"code":"FORBIDDEN","httpStatus":403,"path":"channel.getChannels"}}}     
+    at trpcQuery (src/lib/trpc-client.ts:92:11)                                 
+    at async getChannels (src/services/channelService.ts:45:16)                 
+    at async ChannelPageContent                                                 
+(src/components/channel/ChannelPageContent.tsx:24:26)                           
+  90 |   if (!res.ok) {                                                         
+  91 |     const body = await res.text();                                       
+> 92 |     throw new Error(`tRPC query error [${procedure}]: ${res.status} —    
+${body.slice(0, 200)}`);                                                        
+     |           ^                                                              
+  93 |   }                                                                      
+  94 |                                                                          
+  95 |   const json = await res.json(); {                                       
+  digest: '2312362859'                                                          
+}                                                                               
+
+⏺ The 403 says you don't have server:read permission — meaning you're
+  authenticated now (the cookie fix worked), but you're not a member of the
+  server you're trying to view. Let me trace the flow.
+
+⏺ Searched for 3 patterns, read 3 files (ctrl+o to expand)
+
+⏺ This is a data issue, not a code bug. The permission system is working
+  correctly:
+
+  1. You created an account
+  2. You're trying to view a server (probably harmony-hq)
+  3. The channel.getChannels endpoint requires server:read permission
+  4. server:read requires you to be a member of that server (even GUEST role has
+   it)
+  5. Your new account isn't a member of any server yet → 403 FORBIDDEN
+
+  The question is: how are users supposed to join harmony-hq? Let me check if
+  there's auto-join logic or a seed that should have run.
+
+⏺ Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+⏺ I can see the issue. The register function creates a user but never adds them 
+  to any server. After registration, the frontend redirects to
+  /channels/harmony-hq/general which calls getChannels requiring server:read —
+  but the user isn't a member of harmony-hq.
+
+  Let me check if there's a "join server" flow, and what the frontend does after
+   registration.
+
+⏺ Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ Now I see the full picture. After registration, the user is redirected to
+  /channels/harmony-hq/general, but they haven't joined the harmony-hq server.
+  There's a joinServer tRPC mutation available, but it's never called during
+  registration.
+
+  The simplest fix: auto-join the default server during registration on the
+  backend. Let me check if there's a well-known server to join.
+
+⏺ Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ The right fix is to auto-join newly registered users to the default server
+  (harmony-hq). I'll add this to the backend register method — look up the
+  server by slug and join if it exists.
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 1 line
+       4  import { Prisma } from '@prisma/client';
+       5  import { prisma } from '../db/prisma';
+       6  import { TRPCError } from '@trpc/server';
+       7 +import { serverMemberService } from './serverMember.service';  
+       8  
+       9  const BCRYPT_ROUNDS = 12;
+      10  // Dummy hash used to equalise bcrypt timing when the email is 
+          not found
+
+⏺ Now add the auto-join logic after user creation in the register method:
+
+⏺ Update(harmony-backend/src/services/auth.service.ts)
+  ⎿  Added 13 lines
+      114        throw err;
+      115      }
+      116  
+      117 +    // Auto-join the default public server so new users land i
+          +n a usable state.                                             
+      118 +    const defaultServer = await prisma.server.findFirst({     
+      119 +      where: { slug: 'harmony-hq', isPublic: true },          
+      120 +      select: { id: true },                                   
+      121 +    });                                                       
+      122 +    if (defaultServer) {                                      
+      123 +      try {                                                   
+      124 +        await serverMemberService.joinServer(user.id, defaultS
+          +erver.id);                                                    
+      125 +      } catch {                                               
+      126 +        // Best-effort: don't block registration if the join f
+          +ails                                                          
+      127 +      }                                                       
+      128 +    }                                                         
+      129 +                                                              
+      130      const accessToken = signAccessToken(user.id);
+      131      const refreshToken = signRefreshToken(user.id);
+      132      await storeRefreshToken(user.id, refreshToken);
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ The diagnostic is stale — serverMemberService is used on line ~121. Let me
+  verify the backend compiles.
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-backend && npx tsc
+      --noEmit 2>&1 | head -20)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +14 lines (ctrl+o to expand)
+
+⏺ The pre-existing errors in server.service.ts are unrelated to my changes. No
+  new errors introduced. Both changes compile cleanly.
+
+  Here's what I changed:
+
+  1. harmony-frontend/src/app/actions/session.ts — setSessionCookie now accepts
+  the raw JWT access token string instead of a base64-encoded session payload.
+  This means server-side trpcQuery calls send a valid JWT to the backend.
+
+  2. harmony-frontend/src/context/AuthContext.tsx — Passes getAccessToken() (the
+   real JWT) to setSessionCookie after login, register, and session restore.
+
+  3. harmony-backend/src/services/auth.service.ts — After creating a new user,
+  auto-joins them to the harmony-hq default server (if it exists and is public).
+   This ensures new users have server:read permission when redirected to
+  /channels/harmony-hq/general.
+
+  Restart both dev servers and try registering a new account.
+
+✻ Baked for 40m 28s
+
+❯ Clear the accounts currently in the database                                  
+
+⏺ Bash(npx prisma db seed 2>&1 | tail -5)
+  ⎿    clientVersion: '5.22.0'
+     }
+     … +2 lines (ctrl+o to expand)
+
+⏺ Let me check what seed script does and use Prisma directly instead.
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Bash(npx tsx -e "
+      const { PrismaClient } = require('@prisma/client');…)
+  ⎿  Error: Exit code 1
+     Deleted refresh tokens: 8
+     Deleted server members: 0
+     /Users/dblanc/dev/school/cs485/Harmony/harmony-backend/node_modules/@prisma
+     /client/runtime/library.js:121
+     `)}var co=({clientMethod:e,activeProvider:t})=>r=>{let n="",i;if(pa(r))n=r.
+     sql,i={values:jt(r.values),__prismaRawParameters__:!0};else 
+     if(Array.isArray(r)){let[o,...s]=r;n=o,i={values:jt(s||[]),__prismaRawParam
+     eters__:!0}}else switch(t){case"sqlite":case"mysql":{n=r.sql,i={values:jt(r
+     .values),__prismaRawParameters__:!0};break}case"cockroachdb":case"postgresq
+     l":case"postgres":{n=r.text,i={values:jt(r.values),__prismaRawParameters__:
+     !0};break}case"sqlserver":{n=bl(r),i={values:jt(r.values),__prismaRawParame
+     ters__:!0};break}default:throw new Error(`The ${t} provider does not 
+     support ${e}`)}return i?.values?Tl(`prisma.${e}(${n}, 
+     ${i.values})`):Tl(`prisma.${e}(${n})`),{query:n,parameters:i}},Rl={requestA
+     rgsToMiddlewareArgs(e){return[e.strings,...e.values]},middlewareArgsToReque
+     stArgs(e){let[t,...r]=e;return new oe(t,r)}},Cl={requestArgsToMiddlewareArg
+     s(e){return[e]},middlewareArgsToRequestArgs(e){return e[0]}};function 
+     po(e){return function(r){let n,i=(o=e)=>{try{return o===void 
+     0||o?.kind==="itx"?n??=Sl(r(o)):Sl(r(o))}catch(s){return 
+     Promise.reject(s)}};return{then(o,s){return i().then(o,s)},catch(o){return 
+     i().catch(o)},finally(o){return i().finally(o)},requestTransaction(o){let 
+     s=i(o);return s.requestTransaction?s.requestTransaction(o):s},[Symbol.toStr
+     ingTag]:"PrismaPromise"}}}function Sl(e){return typeof 
+     e.then=="function"?e:Promise.resolve(e)}var 
+     Al={isEnabled(){return!1},getTraceParent(){return"00-10-10-00"},async 
+     createEngineSpan(){},getActiveContext(){},runInChildSpan(e,t){return 
+     t()}},mo=class{isEnabled(){return 
+     this.getGlobalTracingHelper().isEnabled()}getTraceParent(t){return 
+     this.getGlobalTracingHelper().getTraceParent(t)}createEngineSpan(t){return 
+     this.getGlobalTracingHelper().createEngineSpan(t)}getActiveContext(){return
+      
+     this.getGlobalTracingHelper().getActiveContext()}runInChildSpan(t,r){return
+      this.getGlobalTracingHelper().runInChildSpan(t,r)}getGlobalTracingHelper()
+     {return globalThis.PRISMA_INSTRUMENTATION?.helper??Al}};function 
+     Il(e){return e.includes("tracing")?new mo:Al}function Ol(e,t=()=>{}){let 
+     r,n=new 
+     Promise(i=>r=i);return{then(i){return--e===0&&r(t()),i?.(n)}}}function 
+     kl(e){return typeof e=="string"?e:e.reduce((t,r)=>{let n=typeof 
+     r=="string"?r:r.level;return 
+     n==="query"?t:t&&(r==="info"||t==="info")?"info":n},void 0)}var 
+     Ln=class{constructor(){this._middlewares=[]}use(t){this._middlewares.push(t
+     )}get(t){return 
+     this._middlewares[t]}has(t){return!!this._middlewares[t]}length(){return 
+     this._middlewares.length}};var Fl=k(bi());function Nn(e){return typeof 
+     e.batchRequestIdx=="number"}function 
+     Dl(e){if(e.action!=="findUnique"&&e.action!=="findUniqueOrThrow")return;let
+      t=[];return e.modelName&&t.push(e.modelName),e.query.arguments&&t.push(fo(
+     e.query.arguments)),t.push(fo(e.query.selection)),t.join("")}function 
+     fo(e){return`(${Object.keys(e).sort().map(r=>{let n=e[r];return typeof 
+     n=="object"&&n!==null?`(${r} ${fo(n)})`:r}).join(" ")})`}var wm={aggregate:
+     !1,aggregateRaw:!1,createMany:!0,createManyAndReturn:!0,createOne:!0,delete
+     Many:!0,deleteOne:!0,executeRaw:!0,findFirst:!1,findFirstOrThrow:!1,findMan
+     y:!1,findRaw:!1,findUnique:!1,findUniqueOrThrow:!1,groupBy:!1,queryRaw:!1,r
+     unCommandRaw:!0,updateMany:!0,updateOne:!0,upsertOne:!0};function 
+     go(e){return wm[e]}var Mn=class{constructor(t){this.options=t;this.tickActi
+     ve=!1;this.batches={}}request(t){let r=this.options.batchBy(t);return 
+     r?(this.batches[r]||(this.batches[r]=[],this.tickActive||(this.tickActive=!
+     0,process.nextTick(()=>{this.dispatchBatches(),this.tickActive=!1}))),new 
+     Promise((n,i)=>{this.batches[r].push({request:t,resolve:n,reject:i})})):thi
+     s.options.singleLoader(t)}dispatchBatches(){for(let t in this.batches){let 
+     r=this.batches[t];delete this.batches[t],r.length===1?this.options.singleLo
+     ader(r[0].request).then(n=>{n instanceof 
+     Error?r[0].reject(n):r[0].resolve(n)}).catch(n=>{r[0].reject(n)}):(r.sort((
+     n,i)=>this.options.batchOrder(n.request,i.request)),this.options.batchLoade
+     r(r.map(n=>n.request)).then(n=>{if(n instanceof Error)for(let 
+     i=0;i<r.length;i++)r[i].reject(n);else for(let i=0;i<r.length;i++){let 
+     o=n[i];o instanceof 
+     Error?r[i].reject(o):r[i].resolve(o)}}).catch(n=>{for(let 
+     i=0;i<r.length;i++)r[i].reject(n)}))}}get[Symbol.toStringTag](){return"Data
+     Loader"}};function pt(e,t){if(t===null)return 
+     t;switch(e){case"bigint":return BigInt(t);case"bytes":return 
+     Buffer.from(t,"base64");case"decimal":return new 
+     xe(t);case"datetime":case"date":return new Date(t);case"time":return new 
+     Date(`1970-01-01T${t}Z`);case"bigint-array":return 
+     t.map(r=>pt("bigint",r));case"bytes-array":return 
+     t.map(r=>pt("bytes",r));case"decimal-array":return 
+     t.map(r=>pt("decimal",r));case"datetime-array":return 
+     t.map(r=>pt("datetime",r));case"date-array":return 
+     t.map(r=>pt("date",r));case"time-array":return 
+     t.map(r=>pt("time",r));default:return t}}function _l(e){let 
+     t=[],r=xm(e);for(let n=0;n<e
+
+     ... [828 characters truncated] ...
+
+     n?.kind==="itx"?Ll(n.transaction):void 0,o=await 
+     this.client._engine.request(n.protocolQuery,{traceparent:this.client._traci
+     ngHelper.getTraceParent(),interactiveTransaction:i,isWrite:go(n.protocolQue
+     ry.action),customDataProxyFetch:n.customDataProxyFetch});return 
+     this.mapQueryEngineResult(n,o)},batchBy:n=>n.transaction?.id?`transaction-$
+     {n.transaction.id}`:Dl(n.protocolQuery),batchOrder(n,i){return 
+     n.transaction?.kind==="batch"&&i.transaction?.kind==="batch"?n.transaction.
+     index-i.transaction.index:0}})}async request(t){try{return await 
+     this.dataloader.request(t)}catch(r){let{clientMethod:n,callsite:i,transacti
+     on:o,args:s,modelName:a}=t;this.handleAndLogRequestError({error:r,clientMet
+     hod:n,callsite:i,transaction:o,args:s,modelName:a,globalOmit:t.globalOmit})
+     }}mapQueryEngineResult({dataPath:t,unpacker:r},n){let 
+     i=n?.data,o=n?.elapsed,s=this.unpack(i,t,r);return 
+     process.env.PRISMA_CLIENT_GET_TIME?{data:s,elapsed:o}:s}handleAndLogRequest
+     Error(t){try{this.handleRequestError(t)}catch(r){throw 
+     this.logEmitter&&this.logEmitter.emit("error",{message:r.message,target:t.c
+     lientMethod,timestamp:new 
+     Date}),r}}handleRequestError({error:t,clientMethod:r,callsite:n,transaction
+     :i,args:o,modelName:s,globalOmit:a}){if(Pm(t),Tm(t,i)||t instanceof 
+     Le)throw t;if(t instanceof V&&Rm(t)){let u=Nl(t.meta);wn({args:o,errors:[u]
+     ,callsite:n,errorFormat:this.client._errorFormat,originalMethod:r,clientVer
+     sion:this.client._clientVersion,globalOmit:a})}let l=t.message;if(n&&(l=Tt(
+     {callsite:n,originalMethod:r,isPanic:t.isPanic,showColors:this.client._erro
+     rFormat==="pretty",message:l})),l=this.sanitizeMessage(l),t.code){let 
+     u=s?{modelName:s,...t.meta}:t.meta;throw new 
+     V(l,{code:t.code,clientVersion:this.client._clientVersion,meta:u,batchReque
+     stIdx:t.batchRequestIdx})}else{if(t.isPanic)throw new 
+     le(l,this.client._clientVersion);if(t instanceof B)throw new B(l,{clientVer
+     sion:this.client._clientVersion,batchRequestIdx:t.batchRequestIdx});if(t 
+     instanceof R)throw new R(l,this.client._clientVersion);if(t instanceof 
+     le)throw new le(l,this.client._clientVersion)}throw 
+     t.clientVersion=this.client._clientVersion,t}sanitizeMessage(t){return 
+     this.client._errorFormat&&this.client._errorFormat!=="pretty"?(0,Fl.default
+     )(t):t}unpack(t,r,n){if(!t||(t.data&&(t=t.data),!t))return t;let 
+     i=Object.keys(t)[0],o=Object.values(t)[0],s=r.filter(u=>u!=="select"&&u!=="
+     include"),a=Gi(o,s),l=i==="queryRaw"?_l(a):wt(a);return 
+     n?n(l):l}get[Symbol.toStringTag](){return"RequestHandler"}};function 
+     vm(e){if(e){if(e.kind==="batch")return{kind:"batch",options:{isolationLevel
+     :e.isolationLevel}};if(e.kind==="itx")return{kind:"itx",options:Ll(e)};Fe(e
+     ,"Unknown transaction kind")}}function 
+     Ll(e){return{id:e.id,payload:e.payload}}function Tm(e,t){return 
+     Nn(e)&&t?.kind==="batch"&&e.batchRequestIdx!==t.index}function Rm(e){return
+      e.code==="P2009"||e.code==="P2012"}function Nl(e){if(e.kind==="Union")retu
+     rn{kind:"Union",errors:e.errors.map(Nl)};if(Array.isArray(e.selectionPath))
+     {let[,...t]=e.selectionPath;return{...e,selectionPath:t}}return e}var 
+     Ml="5.22.0";var $l=Ml;var Ul=k(Ai());var F=class extends 
+     Error{constructor(t){super(t+`
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                                                
+                                                  
+     … +17 lines (ctrl+o to see all)
+
+⏺ Need to delete messages first due to foreign key constraints. Let me check the
+   schema for the full dependency order.
+
+⏺ Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ Messages reference users without cascade delete, so I need to delete messages
+  first. Let me clear everything properly.
+
+⏺ Bash(npx tsx -e "
+      const { PrismaClient } = require('@prisma/client');…)
+  ⎿  Deleted attachments: 0
+     Deleted messages: 660
+     Deleted audit logs: 0
+     … +3 lines (ctrl+o to expand)
+
+⏺ Done. Cleared 11 user accounts, 660 messages, and all related records from the
+   database. Note that this also deleted the server owners, so the harmony-hq
+  server (if it existed) now has a dangling ownerId. You may want to re-seed the
+   database:
+
+  cd harmony-backend && npx prisma db seed
+
+  Or if the seed script has issues, you could reset everything cleanly:
+
+  cd harmony-backend && npx prisma migrate reset
+
+  That will drop all tables, re-run migrations, and re-seed.
+
+✻ Churned for 32s
+
+❯ Create a new branch and commit the current changes                            
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git status)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +18 lines (ctrl+o to expand)
+
+⏺ Bash(git diff)
+  ⎿  diff --git a/harmony-backend/src/services/auth.service.ts b/harmony-ba
+     ckend/src/services/auth.service.ts
+     index df3caf0..7066652 100644
+     … +77 lines (ctrl+o to expand)
+
+⏺ Bash(git log --oneline -5)
+  ⎿  5917457 Merge pull request #150 from acabrera04/issue/114-frontend-int
+     egration
+     a841256 Address PR #174 review: type-safe member adapter and happy-pat
+     … +6 lines (ctrl+o to expand)
+
+⏺ Bash(git checkout -b fix/auth-cookie-and-auto-join)
+  ⎿  Switched to a new branch 'fix/auth-cookie-and-auto-join'
+
+⏺ Bash(git add harmony-backend/src/services/auth.service.ts
+      harmony-frontend/src/app/actions/session.ts
+      harmony-frontend/src/context/AuthContext.tsx && git commit -m "…)
+  ⎿  [fix/auth-cookie-and-auto-join 1d028f0] fix: store real JWT in auth co
+     okie and auto-join default server on signup
+      3 files changed, 29 insertions(+), 24 deletions(-)
+     … +2 lines (ctrl+o to expand)
+
+⏺ Committed on branch fix/auth-cookie-and-auto-join as 1d028f0. Three files
+  changed:
+
+  - session.ts — stores real JWT instead of base64 session payload
+  - AuthContext.tsx — passes getAccessToken() to the cookie setter
+  - auth.service.ts — auto-joins new users to harmony-hq on registration
+
+❯ Additionally, many of the error messages across the site are non-descriptive  
+(e.g., when trying to log in with bad credentials: `Request failed with status  
+code 401`)                                                                      
+This should instead say something like "Account not found" or "WRong Password"  
+or "Invalid Credentials, Try Again"                                             
+Update this as well as any other similar error messages that should be more     
+descriptive.                                                                    
+
+⏺ Explore(Find non-descriptive error messages)
+  ⎿  Done (30 tool uses · 88.6k tokens · 46s)
+  (ctrl+o to expand)
+
+⏺ Good research. The core issue is that raw axios/tRPC errors propagate directly
+   to the UI. I'll create a centralized error helper and update all the catch
+  blocks. Let me read the key files.
+
+⏺ Read 2 files (ctrl+o to expand)
+
+⏺ Now let me read the remaining files with problematic error handling.
+
+⏺ Read 5 files (ctrl+o to expand)
+
+⏺ Now let me check what the axios errors actually look like to understand the
+  extraction pattern.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Now I understand the full picture. Axios errors have error.response.data which
+   contains the backend's error message (e.g., {error: {message: "Invalid 
+  credentials"}}). The backend sends descriptive messages but they're buried
+  inside the axios error structure. I'll create a utility to extract
+  user-friendly messages and apply it everywhere.
+
+  Let me check the backend error response shape for auth endpoints.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Now I see the backend sends { error: "Invalid credentials" } for REST
+  endpoints and { error: { message: "..." } } for tRPC. The axios error buries
+  these in error.response.data. Let me create the utility and apply it.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Now I'll add the error utility to utils.ts and update all the catch blocks.
+
+⏺ Update(harmony-frontend/src/lib/utils.ts)
+  ⎿  Added 1 line
+      1  import { type ClassValue, clsx } from 'clsx';
+      2  import { twMerge } from 'tailwind-merge';
+      3 +import { isAxiosError } from 'axios';                           
+      4  
+      5  /**
+      6   * Utility function to merge Tailwind CSS classes
+
+⏺ Update(harmony-frontend/src/lib/utils.ts)
+  ⎿  Added 29 lines
+       76  }
+       77  
+       78  /**
+       79 + * Extracts a user-friendly error message from an unknown caug
+          +ht value.                                                     
+       80 + *                                                            
+       81 + * Handles:                                                   
+       82 + *   - Axios errors: reads `response.data.error` (string or ob
+          +ject with `.message`)                                         
+       83 + *   - tRPC HTTP errors embedded in axios: `response.data.erro
+          +r.message`                                                    
+       84 + *   - Plain Error instances with a message                   
+       85 + *   - Falls back to the provided `fallback` string           
+       86 + */                                                           
+       87 +export function getUserErrorMessage(err: unknown, fallback = '
+          +Something went wrong. Please try again.'): string {           
+       88 +  if (isAxiosError(err)) {                                    
+       89 +    const data = err.response?.data;                          
+       90 +    if (data) {                                               
+       91 +      // REST endpoints: { error: "Invalid credentials" }     
+       92 +      if (typeof data.error === 'string') return data.error;  
+       93 +      // tRPC endpoints: { error: { message: "..." } }        
+       94 +      if (typeof data.error?.message === 'string') return data
+          +.error.message;                                               
+       95 +      // Some endpoints: { message: "..." }                   
+       96 +      if (typeof data.message === 'string') return data.messag
+          +e;                                                            
+       97 +    }                                                         
+       98 +  }                                                           
+       99 +  if (err instanceof Error && err.message) {                  
+      100 +    // Filter out raw axios status messages like "Request fail
+          +ed with status code 401"                                      
+      101 +    if (/^Request failed with status code \d+$/.test(err.messa
+          +ge)) return fallback;                                         
+      102 +    return err.message;                                       
+      103 +  }                                                           
+      104 +  return fallback;                                            
+      105 +}                                                             
+      106 +                                                              
+      107 +/**                                                           
+      108   * Truncate text to a specified length
+      109   */
+      110  export function truncate(text: string, maxLength: number): str
+           ing {
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now update all the catch blocks. Let me do them all:
+
+⏺ Update(harmony-frontend/src/app/auth/login/page.tsx)
+  ⎿  Added 1 line
+       4  import { useRouter, useSearchParams } from 'next/navigation';
+       5  import Link from 'next/link';
+       6  import { useAuth } from '@/hooks/useAuth';
+       7 +import { getUserErrorMessage } from '@/lib/utils';             
+       8  
+       9  function LoginForm() {
+      10    const [email, setEmail] = useState('');
+
+⏺ Update(harmony-frontend/src/app/auth/login/page.tsx)
+  ⎿  Added 1 line, removed 1 line
+      29            : null;
+      30        router.push(returnUrl ?? '/channels/harmony-hq/general');
+      31      } catch (err) {
+      32 -      setError(err instanceof Error ? err.message : 'Login fail
+         -ed');                                                          
+      32 +      setError(getUserErrorMessage(err, 'Invalid credentials. P
+         +lease try again.'));                                           
+      33      } finally {
+      34        setIsSubmitting(false);
+      35      }
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/app/auth/signup/page.tsx)
+  ⎿  Added 1 line
+       4  import { useRouter, useSearchParams } from 'next/navigation';
+       5  import Link from 'next/link';
+       6  import { useAuth } from '@/hooks/useAuth';
+       7 +import { getUserErrorMessage } from '@/lib/utils';             
+       8  
+       9  function SignupForm() {
+      10    const [email, setEmail] = useState('');
+
+⏺ Update(harmony-frontend/src/app/auth/signup/page.tsx)
+  ⎿  Added 1 line, removed 1 line
+      31            : null;
+      32        router.push(returnUrl ?? '/channels/harmony-hq/general');
+      33      } catch (err) {
+      34 -      setError(err instanceof Error ? err.message : 'Registrati
+         -on failed');                                                   
+      34 +      setError(getUserErrorMessage(err, 'Registration failed. P
+         +lease try again.'));                                           
+      35      } finally {
+      36        setIsSubmitting(false);
+      37      }
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/channel/CreateChannelModal.tsx)
+  ⎿  Added 1 line
+      11  import { useToast } from '@/hooks/useToast';
+      12  import { ChannelType, ChannelVisibility, type Channel } from '@
+          /types';
+      13  import { createChannelAction } from '@/app/actions/createChanne
+          l';
+      14 +import { getUserErrorMessage } from '@/lib/utils';             
+      15  
+      16  // ─── Name normalisation ─────────────────────────────────────
+          ──────────────────
+      17  
+
+⏺ Update(harmony-frontend/src/components/channel/CreateChannelModal.tsx)
+  ⎿  Added 1 line, removed 1 line
+      232        onCreated(newChannel);
+      233        onClose();
+      234      } catch (err) {
+      235 -      setError(err instanceof Error ? err.message : 'Failed to
+          - create channel.');                                           
+      235 +      setError(getUserErrorMessage(err, 'Failed to create chan
+          +nel.'));                                                      
+      236      } finally {
+      237        setIsLoading(false);
+      238      }
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now the VisibilityToggle:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/channel/VisibilityToggle.tsx)
+  ⎿  Added 1 line, removed 1 line
+       8  'use client';
+       9  
+      10  import { useState, useRef, useEffect } from 'react';
+      11 -import { cn } from '@/lib/utils';                              
+      11 +import { cn, getUserErrorMessage } from '@/lib/utils';         
+      12  import { useToast } from '@/hooks/useToast';
+      13  import { ChannelVisibility } from '@/types';
+      14  import { updateChannelVisibility } from '@/app/settings/[server
+          Slug]/[channelSlug]/updateVisibility';
+
+⏺ Update(harmony-frontend/src/components/channel/VisibilityToggle.tsx)
+  ⎿  Added 1 line, removed 1 line
+      236        showToast({ message: 'Channel visibility updated.', type
+           : 'success' });
+      237      } catch (err) {
+      238        showToast({
+      239 -        message: err instanceof Error ? err.message : 'Failed 
+          -to update visibility.',                                       
+      239 +        message: getUserErrorMessage(err, 'Failed to update vi
+          +sibility.'),                                                  
+      240          type: 'error',
+      241        });
+      242      } finally {
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now the settings pages:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/settings/ServerSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+       8  
+       9  import { useState, useRef } from 'react';
+      10  import { useRouter } from 'next/navigation';
+      11 -import { cn } from '@/lib/utils';                              
+      11 +import { cn, getUserErrorMessage } from '@/lib/utils';         
+      12  import { useAuth } from '@/hooks/useAuth';
+      13  import { saveServerSettings, deleteServerAction } from '@/app/s
+          ettings/[serverSlug]/actions';
+      14  import type { Server } from '@/types';
+
+⏺ Update(harmony-frontend/src/components/settings/ServerSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+      92      } catch (err) {
+      93        if (currentServerIdRef.current !== savedForServerId || sa
+          veCounterRef.current !== thisToken)
+      94          return;
+      95 -      setSaveError(err instanceof Error ? err.message : 'Failed
+         - to save changes');                                            
+      95 +      setSaveError(getUserErrorMessage(err, 'Failed to save cha
+         +nges.'));                                                      
+      96      } finally {
+      97        if (
+      98          currentServerIdRef.current === savedForServerId &&
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/settings/ChannelSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+       8  
+       9  import { useState, useEffect, useRef } from 'react';
+      10  import { useRouter } from 'next/navigation';
+      11 -import { cn } from '@/lib/utils';                              
+      11 +import { cn, getUserErrorMessage } from '@/lib/utils';         
+      12  import { useAuth } from '@/hooks/useAuth';
+      13  import { saveChannelSettings } from '@/app/settings/[serverSlug
+          ]/[channelSlug]/actions';
+      14  import { VisibilityToggle } from '@/components/channel/Visibili
+          tyToggle';
+
+⏺ Update(harmony-frontend/src/components/settings/ChannelSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+      115      } catch (err) {
+      116        if (currentChannelIdRef.current !== savedForChannelId ||
+            saveCounterRef.current !== thisToken)
+      117          return;
+      118 -      setSaveError(err instanceof Error ? err.message : 'Faile
+          -d to save changes');                                          
+      118 +      setSaveError(getUserErrorMessage(err, 'Failed to save ch
+          +anges.'));                                                    
+      119      } finally {
+      120        if (
+      121          currentChannelIdRef.current === savedForChannelId &&
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/settings/UserSettingsPage.tsx)
+  ⎿  Added 1 line
+      10  import { useRouter } from 'next/navigation';
+      11  import Image from 'next/image';
+      12  import { useAuth } from '@/hooks/useAuth';
+      13 +import { getUserErrorMessage } from '@/lib/utils';             
+      14  import { cn } from '@/lib/utils';
+      15  import type { UserStatus } from '@/types';
+      16  import { isChannelGuestAccessible } from '@/app/settings/action
+          s';
+
+⏺ Update(harmony-frontend/src/components/settings/UserSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+      106        setSaved(true);
+      107        setTimeout(() => setSaved(false), 2500);
+      108      } catch (err) {
+      109 -      setSaveError(err instanceof Error ? err.message : 'Faile
+          -d to save');                                                  
+      109 +      setSaveError(getUserErrorMessage(err, 'Failed to save pr
+          +ofile.'));                                                    
+      110      } finally {
+      111        setSaving(false);
+      112      }
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Now the CreateServerModal:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/server-rail/CreateServerModal.tsx)
+  ⎿  Added 1 line
+       4  import { useToast } from '@/hooks/useToast';
+       5  import { createServerAction } from '@/app/channels/actions';
+       6  import type { Server, Channel } from '@/types';
+       7 +import { getUserErrorMessage } from '@/lib/utils';             
+       8  
+       9  interface CreateServerModalProps {
+      10    isOpen: boolean;
+
+⏺ Update(harmony-frontend/src/components/server-rail/CreateServerModal.tsx)
+  ⎿  Added 1 line, removed 1 line
+      103        onCreated(server, defaultChannel);
+      104        onClose();
+      105      } catch (err) {
+      106 -      const message = err instanceof Error ? err.message : 'Fa
+          -iled to create server.';                                      
+      106 +      const message = getUserErrorMessage(err, 'Failed to crea
+          +te server.');                                                 
+      107        setError(message);
+      108        showToast({ message, type: 'error' });
+      109      } finally {
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now let me also check if there's a delete server catch block in
+  ServerSettingsPage:
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/settings/ServerSettingsPage.tsx)
+  ⎿  Added 1 line, removed 1 line
+      191        // deleteServerAction redirects — execution won't reach 
+           here on success
+      192      } catch (err) {
+      193        setDeleting(false);
+      194 -      setDeleteError(err instanceof Error ? err.message : 'Fai
+          -led to delete server');                                       
+      194 +      setDeleteError(getUserErrorMessage(err, 'Failed to delet
+          +e server.'));                                                 
+      195      }
+      196    }
+      197  
+
+⏺ Now verify everything compiles:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | head -20)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ No errors. Let me also check for any other patterns I might have missed:
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ The remaining two are console.warn/console.error for developer logs (not
+  user-facing), so those are fine.
+
+  Now commit:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git status)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +18 lines (ctrl+o to expand)
+
+⏺ Bash(git add harmony-frontend/src/lib/utils.ts
+      harmony-frontend/src/app/auth/login/page.tsx
+      harmony-frontend/src/app/auth/signup/page.tsx
+      harmony-frontend/src/compon…)
+  ⎿  [fix/auth-cookie-and-auto-join 85958d0] fix: show user-friendly error
+     messages instead of raw axios/tRPC errors
+      9 files changed, 47 insertions(+), 12 deletions(-)
+     … +2 lines (ctrl+o to expand)
+
+⏺ Done. Here's what changed:
+
+  New utility getUserErrorMessage() in utils.ts that extracts user-friendly
+  messages by:
+  - Reading response.data.error from axios errors (where the backend puts
+  descriptive messages like "Invalid credentials", "Email already in use",
+  "Username already taken")
+  - Filtering out raw axios messages like "Request failed with status code 401"
+  - Falling back to a context-specific default per call site
+
+  Updated 8 files with specific fallback messages:
+  - Login — "Invalid credentials. Please try again."
+  - Signup — "Registration failed. Please try again."
+  - Create channel — "Failed to create channel."
+  - Create server — "Failed to create server."
+  - Visibility toggle — "Failed to update visibility."
+  - Server settings — "Failed to save changes." / "Failed to delete server."
+  - Channel settings — "Failed to save changes."
+  - User settings — "Failed to save profile."
+
+✻ Churned for 3m 44s
+
+❯ The registration errors are still unclear. For example, when entering a       
+password that is too short. It says "Validation failed", this leaves the user   
+without a clue as to why registration is failing. Make sure error messages      
+provide the necessary details.                                                  
+
+⏺ The "Validation failed" message comes from the backend's Zod validation. Let
+  me check what details are available.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ The backend sends { error: 'Validation failed', details: [...] } where details
+   contains Zod error objects with message fields like "String must contain at
+  least 8 character(s)". I need to update getUserErrorMessage to parse the
+  details array.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ The issue is on line 92 — when data.error === 'Validation failed', it returns
+  that string directly without checking data.details. Let me also check what Zod
+   error details look like:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Zod details are [{ path: ["password"], message: "String must contain at least 
+  8 character(s)" }]. I need to extract those into readable messages. The Zod
+  messages are also not great — "String must contain at least 8 character(s)"
+  should be "Password must be at least 8 characters".
+
+  I'll fix both sides: make the backend Zod schemas use better messages, and
+  make the frontend getUserErrorMessage extract details.
+
+⏺ Update(harmony-backend/src/routes/auth.router.ts)
+  ⎿  Added 14 lines, removed 7 lines
+       8  // ─── Input schemas ──────────────────────────────────────────
+          ──────────────────
+       9  
+      10  const registerSchema = z.object({
+      11 -  email: z.string().email(),                                   
+      12 -  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/,
+         - {                                                             
+      13 -    message: 'Username may only contain letters, numbers, under
+         -scores, and hyphens',                                          
+      14 -  }),                                                          
+      15 -  password: z.string().min(8).max(72),                         
+      11 +  email: z.string().email({ message: 'Please enter a valid emai
+         +l address' }),                                                 
+      12 +  username: z                                                  
+      13 +    .string()                                                  
+      14 +    .min(3, { message: 'Username must be at least 3 characters'
+         + })                                                            
+      15 +    .max(32, { message: 'Username must be at most 32 characters
+         +' })                                                           
+      16 +    .regex(/^[a-zA-Z0-9_-]+$/, {                               
+      17 +      message: 'Username may only contain letters, numbers, und
+         +erscores, and hyphens',                                        
+      18 +    }),                                                        
+      19 +  password: z                                                  
+      20 +    .string()                                                  
+      21 +    .min(8, { message: 'Password must be at least 8 characters'
+         + })                                                            
+      22 +    .max(72, { message: 'Password must be at most 72 characters
+         +' }),                                                          
+      23  });
+      24  
+      25  const loginSchema = z.object({
+      19 -  email: z.string().email(),                                   
+      20 -  password: z.string().min(1),                                 
+      26 +  email: z.string().email({ message: 'Please enter a valid emai
+         +l address' }),                                                 
+      27 +  password: z.string().min(1, { message: 'Password is required'
+         + }),                                                           
+      28  });
+      29  
+      30  const logoutSchema = z.object({
+
+⏺ Now update the frontend getUserErrorMessage to extract details:
+
+⏺ Update(harmony-frontend/src/lib/utils.ts)
+  ⎿  Added 8 lines, removed 1 line
+       88    if (isAxiosError(err)) {
+       89      const data = err.response?.data;
+       90      if (data) {
+       91 +      // Validation errors: { error: "Validation failed", deta
+          +ils: [{ message: "..." }] }                                   
+       92 +      if (Array.isArray(data.details) && data.details.length >
+          + 0) {                                                         
+       93 +        const messages = data.details                         
+       94 +          .map((d: { message?: string }) => d.message)        
+       95 +          .filter(Boolean);                                   
+       96 +        if (messages.length > 0) return messages.join('. ');  
+       97 +      }                                                       
+       98        // REST endpoints: { error: "Invalid credentials" }
+       92 -      if (typeof data.error === 'string') return data.error;  
+       99 +      if (typeof data.error === 'string' && data.error !== 'Va
+          +lidation failed') return data.error;                          
+      100        // tRPC endpoints: { error: { message: "..." } }
+      101        if (typeof data.error?.message === 'string') return data
+           .error.message;
+      102        // Some endpoints: { message: "..." }
+
+⏺ Now verify both compile:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | head -5)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-backend && npx tsc
+      --noEmit 2>&1 | head -10)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ No errors on either side. Now commit:
+
+⏺ Bash(git add harmony-backend/src/routes/auth.router.ts
+      harmony-frontend/src/lib/utils.ts && git commit -m "$(cat <<'EOF'
+      fix: show specific validation errors for reg…)
+  ⎿  Error: Exit code 128
+     fatal: pathspec 'harmony-backend/src/routes/auth.router.ts' did not match 
+     any files
+
+⏺ Bash(git diff --name-only)
+  ⎿  harmony-backend/src/routes/auth.router.ts
+     harmony-frontend/src/lib/utils.ts
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git add
+      harmony-backend/src/routes/auth.router.ts
+      harmony-frontend/src/lib/utils.ts && git commit -m "$(cat <<'EOF'…)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +9 lines (ctrl+o to expand)
+
+⏺ Done. Two changes:
+
+  Backend (auth.router.ts) — Zod schemas now have human-readable messages:
+  - "Password must be at least 8 characters" (was: "String must contain at least
+   8 character(s)")
+  - "Username must be at least 3 characters"
+  - "Please enter a valid email address"
+  - "Password is required" (login)
+
+  Frontend (utils.ts) — getUserErrorMessage() now extracts the details array
+  from validation error responses, so users see the specific field error instead
+   of "Validation failed".
+
+✻ Crunched for 57s
+
+❯ Great, the descriptive error messages seem to be done.                        
+                                                                                
+Moving on, I am able to view the "HarmonyHQ" server when logged in now, but     
+when I attempt to navigate to one of the other servers in the server list, I    
+once again see the "Something went wrong.                                       
+An unexpected error occurred. You can try again, or head back home if the       
+problem persists."                                                              
+Also, the frontend console shows the following:                                 
+ GET / 200 in 29ms (compile: 5ms, render: 24ms)                                 
+ GET /c/harmony-hq/general 200 in 52ms (compile: 4ms, render: 48ms)             
+ GET /c/harmony-hq/general 200 in 52ms (compile: 28ms, render: 24ms)            
+ GET /channels/harmony-hq/general 200 in 76ms (compile: 25ms, proxy.ts: 2ms,    
+render: 49ms)                                                                   
+ GET /channels/harmony-hq/general 200 in 96ms (compile: 5ms, proxy.ts: 2ms,     
+render: 88ms)                                                                   
+⨯ Error: tRPC query error [channel.getChannels]: 403 — {"error":{"message":"You 
+ do not have permission to perform 'server:read' in this server","code":-32003, 
+"data":{"code":"FORBIDDEN","httpStatus":403,"path":"channel.getChannels"}}}     
+    at trpcQuery (src/lib/trpc-client.ts:92:11)                                 
+    at async getChannels (src/services/channelService.ts:45:16)                 
+    at async ChannelPageContent                                                 
+(src/components/channel/ChannelPageContent.tsx:24:26)                           
+  90 |   if (!res.ok) {                                                         
+  91 |     const body = await res.text();                                       
+> 92 |     throw new Error(`tRPC query error [${procedure}]: ${res.status} —    
+${body.slice(0, 200)}`);                                                        
+     |           ^                                                              
+  93 |   }                                                                      
+  94 |                                                                          
+  95 |   const json = await res.json(); {                                       
+  digest: '2312362859'                                                          
+}                                                                               
+
+⏺ Same 403 as before — you're not a member of the other servers. The auto-join
+  on registration only adds you to harmony-hq. The seeded servers have their own
+   owners/members, but since we cleared all users earlier, those memberships are
+   gone.
+
+  You have two options:
+
+  1. Re-seed the database to restore all the mock users and memberships:
+  cd harmony-backend && npx prisma migrate reset
+  2. Or, if you want to keep your current account and just join the other
+  servers, I can check what servers exist and join you to them.
+
+  Which would you prefer? Re-seeding is the cleanest path since it'll restore
+  the full demo dataset.
+
+❯ If I am not a member of the other servers, they should not appear in my       
+server list. Don't fix this right now, but create an issue for it on the GitHub 
+ repository                                                                     
+
+⏺ Bash(gh repo view --json nameWithOwner -q '.nameWithOwner')
+  ⎿  acabrera04/Harmony
+
+⏺ Bash(gh issue create --title "Server list shows servers the user is not a
+      member of" --body "$(cat <<'EOF'
+      ## Description…)
+  ⎿  https://github.com/acabrera04/Harmony/issues/179
+
+⏺ Created issue #179 — "Server list shows servers the user is not a member of".
+
+❯ I'm able to view the HarmonyHQ server, but when I open two separate clients   
+and send a message in one, the other client doesn't see the new message come    
+in.                                                                             
+
+⏺ Explore(Investigate real-time messaging setup)
+  ⎿  Done (42 tool uses · 76.4k tokens · 1m 12s)
+  (ctrl+o to expand)
+
+⏺ Real-time messaging is not implemented yet. Here's the situation:
+
+  - Sending works via HTTP (tRPC mutation) — your own message appears via
+  optimistic UI update
+  - Receiving others' messages has no mechanism — no WebSocket, no SSE, no
+  polling
+  - The Redis Pub/Sub eventBus exists but is only used internally (cache
+  invalidation) and is never exposed to clients
+  - The MESSAGE_CREATED event is never even published when a message is sent
+
+  This is a significant feature gap, not a quick fix. Want me to create a GitHub
+   issue for it?
+
+✻ Cogitated for 1m 29s
+
+❯ Yes make an issue for it, but first check to make sure an issue covering this 
+ does not already exist.                                                        
+
+⏺ Bash(gh issue list --repo acabrera04/Harmony --state open --limit 50 --json
+      number,title,labels 2>&1)
+  ⎿  [
+       {
+         "labels": [],
+     … +99 lines (ctrl+o to expand)
+
+⏺ No existing issue covers real-time messaging. Let me also check closed issues
+  to be thorough.
+
+⏺ Bash(gh issue list --repo acabrera04/Harmony --state closed --search
+      "real-time OR realtime OR websocket OR socket OR polling OR SSE OR live
+      update" --limit 20 --jso…)
+  ⎿  [
+       {
+         "number": 147,
+     … +12 lines (ctrl+o to expand)
+
+⏺ No existing issue. Creating one now.
+
+⏺ Bash(gh issue create --title "Real-time messaging: other clients don't receive
+       new messages" --body "$(cat <<'EOF'
+      ## Description…)
+  ⎿  https://github.com/acabrera04/Harmony/issues/180
+
+⏺ Created #180 — "Real-time messaging: other clients don't receive new
+  messages". No duplicates existed. The issue documents the full gap: what
+  infrastructure exists (Redis eventBus), what's missing (WebSocket/SSE
+  transport, event publishing, client listener), and the affected files.
+
+✻ Sautéed for 35s
+
+❯ Create a PR for the current branch                                            
+
+⏺ Bash(git log main..HEAD --oneline)
+  ⎿  0911f9e fix: show specific validation errors for registration and logi
+     n
+     85958d0 fix: show user-friendly error messages instead of raw axios/tR
+     … +3 lines (ctrl+o to expand)
+
+⏺ Bash(git diff main...HEAD --stat)
+  ⎿   harmony-backend/src/routes/auth.router.ts          | 21 ++++++++----
+      harmony-backend/src/services/auth.service.ts       | 14 ++++++++
+      harmony-frontend/src/app/actions/session.ts        | 22 ++++---------
+     … +12 lines (ctrl+o to expand)
+
+⏺ Bash(git status)
+  ⎿  On branch fix/auth-cookie-and-auto-join
+     nothing to commit, working tree clean
+
+⏺ Bash(git push -u origin fix/auth-cookie-and-auto-join 2>&1)
+  ⎿  remote:
+     remote: Create a pull request for 'fix/auth-cookie-and-auto-join' on G
+     itHub by visiting:
+     … +8 lines (ctrl+o to expand)
+
+⏺ Bash(gh pr create --title "Fix auth cookie, auto-join default server, and
+      improve error messages" --body "$(cat <<'EOF'
+      ## Summary…)
+  ⎿  https://github.com/acabrera04/Harmony/pull/181
+
+⏺ Created PR #181 — "Fix auth cookie, auto-join default server, and improve
+  error messages".
+
+❯ Is there an admin login I can use to test things such as creating text        
+channels                                                                        
+
+⏺ Searched for 2 patterns, read 2 files (ctrl+o to expand)
+
+⏺ The seed data uses passwordHash: '!' which is an invalid bcrypt hash — you
+  can't log in as any seeded user. There are no pre-configured admin
+  credentials.
+
+  Your best option: register a new account (which auto-joins harmony-hq as a
+  MEMBER), then promote yourself to OWNER via a quick DB command:
+
+  cd harmony-backend && npx tsx -e "
+  const { PrismaClient } = require('@prisma/client');
+  const p = new PrismaClient();
+  p.serverMember.updateMany({
+    where: { user: { username: 'YOUR_USERNAME' } },
+    data: { role: 'OWNER' }
+  }).then(r => { console.log('Updated', r.count, 'memberships to OWNER'); 
+  p.\$disconnect(); });
+  "
+
+  Replace YOUR_USERNAME with whatever username you registered with. That'll give
+   you full admin/owner permissions to create channels, manage settings, etc.
+  Want me to run it for you?
+
+❯ The command appears to have run successfully, however I don't see any admin   
+UI elements on the page.                                                        
+ npx tsx -e "                                                                  
+  const { PrismaClient } = require('@prisma/client');                           
+  const p = new PrismaClient();                                                 
+  p.serverMember.updateMany({                                                   
+    where: { user: { username: 'DeclanBlanc' } },                               
+    data: { role: 'OWNER' }                                                     
+  }).then(r => { console.log('Updated', r.count, 'memberships to OWNER');       
+p.\$disconnect(); });                                                           
+  "                                                                             
+Updated 1 memberships to OWNER                                                  
+
+⏺ The role was updated in the DB, but the frontend needs to know about it. Let
+  me check how admin UI is gated.
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ I see the issue. The ChannelSidebar and TopBar check currentUser.role, but
+  authService.ts hardcodes role to 'member':
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Now let me check where currentUser is passed from — the key issue is that
+  User.role is always 'member' per authService.ts:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ There's the problem. User.role is hardcoded to 'member'. The isAdmin function
+  in AuthContext supports checking via serverOwnerId, but ChannelSidebar and
+  TopBar check currentUser.role directly instead of using
+  isAdmin(server.ownerId).
+
+  Let me see how these components get their data to understand the right fix.
+
+⏺ Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ Both ChannelSidebar and TopBar use currentUser.role which is always 'member'.
+  The server.ownerId is available on currentServer. The fix is to check against
+  server.ownerId instead of relying on the hardcoded user role.
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ The cleanest fix: pass the server's ownerId down and use it for the admin
+  check, since roles are server-scoped (stored in ServerMember, not User). Both
+  ChannelSidebar and TopBar already have access to the server.
+
+⏺ Update(harmony-frontend/src/components/channel/ChannelSidebar.tsx)
+  ⎿  Added 1 line, removed 2 lines
+      175    const [voiceCollapsed, setVoiceCollapsed] = useState(false);
+      176  
+      177    const isAdmin =
+      178 -    isAuthenticated &&                                        
+      179 -    (currentUser.role === 'owner' || currentUser.role === 'adm
+          -in');                                                         
+      178 +    isAuthenticated && currentUser.id === server.ownerId;     
+      179  
+      180    const textChannels = channels.filter(
+      181      c =>
+
+⏺ Now update the server name display that also checks role:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/channel/ChannelSidebar.tsx)
+  ⎿  Added 1 line, removed 1 line
+      211          {/* Server name header */}
+      212          <div className='flex h-12 flex-shrink-0 items-center b
+           order-b border-black/20 px-4 font-semibold text-white shadow-s
+           m'>
+      213            <span className='truncate'>{server.name}</span>
+      214 -          {currentUser.role === 'owner' || currentUser.role ==
+          -= 'admin' ? (                                                 
+      214 +          {isAdmin ? (                                        
+      215              <Link
+      216                href={`/settings/${server.slug}`}
+      217                title='Server settings'
+
+⏺ Now fix TopBar — it receives userRole as a prop, but should use ownerId
+  instead:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/channel/TopBar.tsx)
+  ⎿  Added 2 lines, removed 2 lines
+      149    channel: Pick<Channel, 'name' | 'topic' | 'slug'>;
+      150    /** The server slug, used to build the settings link */
+      151    serverSlug: string;
+      152 -  /** Role of the current user — determines if the settings ge
+          -ar is shown */                                                
+      153 -  userRole?: UserRole;                                        
+      152 +  /** Whether the current user has admin access (owner of the 
+          +server) */                                                    
+      153 +  isAdmin?: boolean;                                          
+      154    /** Whether the members sidebar is currently open */
+      155    isMembersOpen?: boolean;
+      156    /** Callback to toggle the members sidebar */
+
+⏺ Update(harmony-frontend/src/components/channel/TopBar.tsx)
+  ⎿  Added 1 line, removed 2 lines
+      168  export function TopBar({
+      169    channel,
+      170    serverSlug,
+      171 -  userRole,                                                   
+      171 +  isAdmin = false,                                            
+      172    isMembersOpen,
+      173    onMembersToggle,
+      174    isMenuOpen,
+     ...
+      176    onSearchOpen,
+      177    onPinsOpen,
+      178  }: TopBarProps) {
+      179 -  const isAdmin = userRole === 'owner' || userRole === 'admin'
+          -;                                                             
+      179    const settingsHref = `/settings/${serverSlug}/${channel.slug
+           }`;
+      180  
+      181    return (
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now update HarmonyShell to pass isAdmin instead of userRole:
+
+⏺ Update(harmony-frontend/src/components/layout/HarmonyShell.tsx)
+  ⎿  Added 1 line, removed 1 line
+      200          <TopBar
+      201            channel={currentChannel}
+      202            serverSlug={currentServer.slug}
+      203 -          userRole={currentUser.role}                         
+      203 +          isAdmin={currentUser.id === currentServer.ownerId}  
+      204            isMembersOpen={isMembersOpen}
+      205            onMembersToggle={() => setIsMembersOpen(!isMembersOp
+           en)}
+      206            onSearchOpen={() => setIsSearchOpen(true)}
+
+⏺ Now clean up the unused UserRole import in TopBar:
+
+⏺ Read 1 file (ctrl+o to expand)
+
+⏺ Update(harmony-frontend/src/components/channel/TopBar.tsx)
+  ⎿  Removed 1 line
+      11  import { cn } from '@/lib/utils';
+      12  import { truncate } from '@/lib/utils';
+      13  import type { Channel } from '@/types';
+      14 -import type { UserRole } from '@/types';                       
+      14  
+      15  // ─── Icons (inline SVG to avoid extra dependencies) ─────────
+          ─────────────────
+      16  
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony/harmony-frontend && npx tsc
+      --noEmit 2>&1 | head -10)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +5 lines (ctrl+o to expand)
+
+⏺ Clean. Now commit and push:
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git add
+      harmony-frontend/src/components/channel/ChannelSidebar.tsx
+      harmony-frontend/src/components/channel/TopBar.t…)
+  ⎿  Error: Exit code 1
+     zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shell 
+     configuration file (usually ~/.zshrc).
+
+     If the issue persists, consider filing an issue at:
+     https://github.com/ajeetdsouza/zoxide/issues
+
+     Disable this message by setting _ZO_DOCTOR=0.
+
+     [fix/auth-cookie-and-auto-join 7f8d61a] fix: use server ownerId for admin 
+     UI checks instead of hardcoded user role
+     … +9 lines (ctrl+o to see all)
+
+⏺ Bash(cd /Users/dblanc/dev/school/cs485/Harmony && git pull --rebase && git
+      push)
+  ⎿  zoxide: detected a possible configuration issue.
+     Please ensure that zoxide is initialized right at the end of your shel
+     l configuration file (usually ~/.zshrc).
+     … +14 lines (ctrl+o to expand)
+
+⏺ Pushed. The fix: ChannelSidebar and TopBar now check user.id === 
+  server.ownerId instead of currentUser.role === 'owner', which was always
+  'member'. Reload the page and you should see the settings gear and "+" buttons
+   for creating channels.
+
+✻ Churned for 1m 44s
+
+❯ Did you update the PR to reflect the additional changes                       
+
+⏺ No, let me update it now.
+
+⏺ Bash(gh pr view 181 --json title,body -q '.body' 2>&1 | head -5)
+  ⎿  ## Summary
+
+     - **Auth cookie fix**: Store the real JWT access token in the httpOnly
+     … +12 lines (ctrl+o to expand)
+
+⏺ Bash(gh pr edit 181 --body "$(cat <<'EOF'
+      ## Summary…)
+  ⎿  https://github.com/acabrera04/Harmony/pull/181
+
+⏺ Updated PR #181 with the admin UI visibility fix in the summary and three new
+  test plan items.
