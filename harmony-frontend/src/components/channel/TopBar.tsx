@@ -11,7 +11,6 @@ import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { truncate } from '@/lib/utils';
 import type { Channel } from '@/types';
-import type { UserRole } from '@/types';
 
 // ─── Icons (inline SVG to avoid extra dependencies) ──────────────────────────
 
@@ -149,8 +148,8 @@ export interface TopBarProps {
   channel: Pick<Channel, 'name' | 'topic' | 'slug'>;
   /** The server slug, used to build the settings link */
   serverSlug: string;
-  /** Role of the current user — determines if the settings gear is shown */
-  userRole?: UserRole;
+  /** Whether the current user has admin access (owner of the server) */
+  isAdmin?: boolean;
   /** Whether the members sidebar is currently open */
   isMembersOpen?: boolean;
   /** Callback to toggle the members sidebar */
@@ -168,7 +167,7 @@ export interface TopBarProps {
 export function TopBar({
   channel,
   serverSlug,
-  userRole,
+  isAdmin = false,
   isMembersOpen,
   onMembersToggle,
   isMenuOpen,
@@ -176,7 +175,6 @@ export function TopBar({
   onSearchOpen,
   onPinsOpen,
 }: TopBarProps) {
-  const isAdmin = userRole === 'owner' || userRole === 'admin';
   const settingsHref = `/settings/${serverSlug}/${channel.slug}`;
 
   return (

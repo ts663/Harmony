@@ -8,16 +8,23 @@ export const authRouter = Router();
 // ─── Input schemas ────────────────────────────────────────────────────────────
 
 const registerSchema = z.object({
-  email: z.string().email(),
-  username: z.string().min(3).max(32).regex(/^[a-zA-Z0-9_-]+$/, {
-    message: 'Username may only contain letters, numbers, underscores, and hyphens',
-  }),
-  password: z.string().min(8).max(72),
+  email: z.string().email({ message: 'Please enter a valid email address' }),
+  username: z
+    .string()
+    .min(3, { message: 'Username must be at least 3 characters' })
+    .max(32, { message: 'Username must be at most 32 characters' })
+    .regex(/^[a-zA-Z0-9_-]+$/, {
+      message: 'Username may only contain letters, numbers, underscores, and hyphens',
+    }),
+  password: z
+    .string()
+    .min(8, { message: 'Password must be at least 8 characters' })
+    .max(72, { message: 'Password must be at most 72 characters' }),
 });
 
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
+  email: z.string().email({ message: 'Please enter a valid email address' }),
+  password: z.string().min(1, { message: 'Password is required' }),
 });
 
 const logoutSchema = z.object({
