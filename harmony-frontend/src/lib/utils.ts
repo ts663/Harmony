@@ -88,8 +88,15 @@ export function getUserErrorMessage(err: unknown, fallback = 'Something went wro
   if (isAxiosError(err)) {
     const data = err.response?.data;
     if (data) {
+      // Validation errors: { error: "Validation failed", details: [{ message: "..." }] }
+      if (Array.isArray(data.details) && data.details.length > 0) {
+        const messages = data.details
+          .map((d: { message?: string }) => d.message)
+          .filter(Boolean);
+        if (messages.length > 0) return messages.join('. ');
+      }
       // REST endpoints: { error: "Invalid credentials" }
-      if (typeof data.error === 'string') return data.error;
+      if (typeof data.error === 'string' && data.error !== 'Validation failed') return data.error;
       // tRPC endpoints: { error: { message: "..." } }
       if (typeof data.error?.message === 'string') return data.error.message;
       // Some endpoints: { message: "..." }
