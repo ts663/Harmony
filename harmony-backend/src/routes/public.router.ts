@@ -126,6 +126,7 @@ publicRouter.get(
 publicRouter.get('/servers', async (_req: Request, res: Response) => {
   try {
     const servers = await prisma.server.findMany({
+      where: { isPublic: true },
       orderBy: { memberCount: 'desc' },
       take: 20,
       select: {

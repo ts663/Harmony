@@ -6,6 +6,7 @@
  */
 
 import { notFound } from 'next/navigation';
+import { isAxiosError } from 'axios';
 import {
   fetchPublicServer,
   fetchPublicChannel,
@@ -112,8 +113,7 @@ export async function GuestChannelView({ serverSlug, channelSlug }: GuestChannel
     await getChannels(server.id);
     isMember = true;
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : '';
-    isMember = !msg.includes(': 403 ');
+    isMember = !(isAxiosError(err) && err.response?.status === 403);
   }
 
   if (channelResult.isPrivate) {
