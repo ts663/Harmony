@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Message } from '@/types/message';
 
 export interface UseChannelEventsOptions {
@@ -41,14 +41,18 @@ export function useChannelEvents({
 }: UseChannelEventsOptions): UseChannelEventsResult {
   const [isConnected, setIsConnected] = useState(false);
 
-  // Keep stable references to callbacks so the effect doesn't re-run on every render
+  // Keep stable references to callbacks so the effect doesn't re-run on every render.
+  // Updated via useLayoutEffect (before paint) so the EventSource handlers always call
+  // the latest version without the effect needing them as dependencies.
   const onCreatedRef = useRef(onMessageCreated);
   const onEditedRef = useRef(onMessageEdited);
   const onDeletedRef = useRef(onMessageDeleted);
 
-  onCreatedRef.current = onMessageCreated;
-  onEditedRef.current = onMessageEdited;
-  onDeletedRef.current = onMessageDeleted;
+  useLayoutEffect(() => {
+    onCreatedRef.current = onMessageCreated;
+    onEditedRef.current = onMessageEdited;
+    onDeletedRef.current = onMessageDeleted;
+  });
 
   useEffect(() => {
     if (!enabled || !channelId) return;
