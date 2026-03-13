@@ -80,10 +80,11 @@ export const channelRouter = router({
 
   /**
    * Retrieve paginated visibility audit log for a channel.
-   * Requires channel:read (same permission as getVisibility).
+   * Requires channel:manage_visibility (admin+) because audit rows contain
+   * sensitive per-actor metadata (ipAddress, userAgent).
    * Uses serverId to verify the channel belongs to the caller's server.
    */
-  getAuditLog: withPermission('channel:read')
+  getAuditLog: withPermission('channel:manage_visibility')
     .input(
       z.object({
         serverId: z.string().uuid(),

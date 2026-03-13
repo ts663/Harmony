@@ -274,8 +274,13 @@ function VisibilitySection({
   const [auditOffset, setAuditOffset] = useState(0);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
+  // Monotonically-incrementing token: only the response from the latest in-flight
+  // request is applied. Older in-flight fetches (channel switch, rapid pagination)
+  // compare against this ref and discard their results if they are stale.
+  const requestTokenRef = useRef(0);
 
   const loadAuditLog = useCallback(async (offset: number) => {
+    const token = ++requestTokenRef.current;
     setAuditLoading(true);
     setAuditError(null);
     try {
@@ -283,11 +288,13 @@ function VisibilitySection({
         limit: AUDIT_PAGE_SIZE,
         offset,
       });
+      if (requestTokenRef.current !== token) return; // stale — discard
       setAuditLog(page);
     } catch (err) {
+      if (requestTokenRef.current !== token) return;
       setAuditError(getUserErrorMessage(err, 'Failed to load audit log.'));
     } finally {
-      setAuditLoading(false);
+      if (requestTokenRef.current === token) setAuditLoading(false);
     }
   }, [channel.serverId, channel.id]);
 
@@ -309,6 +316,12 @@ function VisibilitySection({
     void loadAuditLog(newOffset);
   }
 
+  // Reset to page 0 and reload after a visibility change.
+  function handleVisibilityChanged() {
+    setAuditOffset(0);
+    void loadAuditLog(0);
+  }
+
   const hasMore = auditLog !== null && auditOffset + AUDIT_PAGE_SIZE < auditLog.total;
 
   return (
@@ -318,7 +331,7 @@ function VisibilitySection({
         channelSlug={channel.slug}
         initialVisibility={channel.visibility}
         disabled={disabled}
-        onVisibilityChanged={() => void loadAuditLog(0)}
+        onVisibilityChanged={handleVisibilityChanged}
       />
 
       {/* Audit log */}
