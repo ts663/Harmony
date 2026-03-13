@@ -187,11 +187,12 @@ export async function getAuditLog(
   channelId: string,
   options: { limit?: number; offset?: number; startDate?: string } = {},
 ): Promise<AuditLogPage> {
+  // noCache: audit log must reflect entries written moments ago by setVisibility.
   const data = await trpcQuery<AuditLogPage>('channel.getAuditLog', {
     serverId,
     channelId,
     ...options,
-  });
+  }, { noCache: true });
   return data;
 }
 
