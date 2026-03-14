@@ -59,12 +59,19 @@ export async function saveChannelSettings(
 
 /**
  * Server action: fetch paginated audit log for a channel.
- * Called from the client-side VisibilitySection to display audit history.
+ * Resolves IDs from route slugs (don't trust raw IDs from the client),
+ * matching the same defense-in-depth pattern used by saveChannelSettings.
  */
 export async function fetchAuditLog(
-  serverId: string,
-  channelId: string,
+  serverSlug: string,
+  channelSlug: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<AuditLogPage> {
-  return getAuditLog(serverId, channelId, options);
+  const channel = await getChannel(serverSlug, channelSlug);
+  if (!channel) throw new Error('Channel not found');
+
+  const server = await getServer(serverSlug);
+  if (!server) throw new Error('Server not found');
+
+  return getAuditLog(server.id, channel.id, options);
 }

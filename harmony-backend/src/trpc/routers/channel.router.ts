@@ -95,7 +95,9 @@ export const channelRouter = router({
       }),
     )
     .query(async ({ input }) => {
-      // Verify the channel belongs to the given server before returning audit data.
+      // withPermission validates the caller has admin rights in `serverId`, but does NOT
+      // verify that `channelId` belongs to that server. Without this check, an admin of
+      // server A could supply a channelId from server B and read its audit data.
       await visibilityService.getVisibility(input.channelId, input.serverId);
       return auditLogService.getVisibilityAuditLog(input.channelId, {
         limit: input.limit,

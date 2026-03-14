@@ -284,7 +284,7 @@ function VisibilitySection({
     setAuditLoading(true);
     setAuditError(null);
     try {
-      const page = await fetchAuditLog(channel.serverId, channel.id, {
+      const page = await fetchAuditLog(serverSlug, channel.slug, {
         limit: AUDIT_PAGE_SIZE,
         offset,
       });
@@ -296,7 +296,7 @@ function VisibilitySection({
     } finally {
       if (requestTokenRef.current === token) setAuditLoading(false);
     }
-  }, [channel.serverId, channel.id]);
+  }, [serverSlug, channel.slug]);
 
   // Load audit log when section mounts or channel changes.
   useEffect(() => {
