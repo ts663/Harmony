@@ -14,5 +14,5 @@ export const attachmentRouter = router({
         messageId: z.string().uuid(),
       }),
     )
-    .query(({ input }) => attachmentService.listByMessage(input.messageId)),
+    .query(({ input }) => attachmentService.listByMessage(input.messageId, input.serverId)),
 });

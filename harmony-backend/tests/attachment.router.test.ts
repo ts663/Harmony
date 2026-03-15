@@ -2,7 +2,7 @@
  * attachment.router.test.ts — Issue #112
  *
  * Integration tests for POST /api/attachments/upload.
- * Uses mocked auth, storage provider, and attachment service — no DB or disk I/O required.
+ * Uses mocked auth, storage provider, and file-type — no DB or disk I/O required.
  */
 
 import request from 'supertest';
@@ -34,12 +34,23 @@ jest.mock('../src/lib/storage', () => ({
   },
 }));
 
+// Mock the mime-detect wrapper (which wraps the ESM-only file-type package).
+// detectMimeType is configured per-test via mockResolvedValueOnce.
+const mockDetectMimeType = jest.fn();
+jest.mock('../src/lib/mime-detect', () => ({
+  detectMimeType: (...args: unknown[]) => mockDetectMimeType(...args),
+}));
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 let app: Express;
 
 beforeAll(() => {
   app = createApp();
+});
+
+beforeEach(() => {
+  mockDetectMimeType.mockReset();
 });
 
 describe('POST /api/attachments/upload', () => {
@@ -70,13 +81,31 @@ describe('POST /api/attachments/upload', () => {
         contentType: 'application/x-sh',
       });
 
+    // validateUpload rejects before magic-byte check is reached
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/unsupported content type/i);
   });
 
-  it('returns 201 with attachment metadata for a valid image upload', async () => {
-    const fileBuffer = Buffer.from('fake-png-data');
+  it('returns 400 when magic bytes do not match declared type', async () => {
+    // Declare image/png but mime-detect returns application/pdf
+    mockDetectMimeType.mockResolvedValueOnce('application/pdf');
 
+    const res = await request(app)
+      .post('/api/attachments/upload')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .attach('file', Buffer.from('fake-data'), {
+        filename: 'not-a-png.png',
+        contentType: 'image/png',
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/does not match declared type/i);
+  });
+
+  it('returns 201 with attachment metadata for a valid image upload', async () => {
+    mockDetectMimeType.mockResolvedValueOnce('image/png');
+
+    const fileBuffer = Buffer.from('fake-png-data');
     const res = await request(app)
       .post('/api/attachments/upload')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
@@ -92,8 +121,9 @@ describe('POST /api/attachments/upload', () => {
   });
 
   it('returns 201 for a valid PDF upload', async () => {
-    const pdfBuffer = Buffer.from('%PDF-1.4 fake content');
+    mockDetectMimeType.mockResolvedValueOnce('application/pdf');
 
+    const pdfBuffer = Buffer.from('%PDF-1.4 fake content');
     const res = await request(app)
       .post('/api/attachments/upload')
       .set('Authorization', `Bearer ${VALID_TOKEN}`)
@@ -104,5 +134,21 @@ describe('POST /api/attachments/upload', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.contentType).toBe('application/pdf');
+  });
+
+  it('returns 201 for text/plain (no magic bytes — check skipped)', async () => {
+    // file-type returns undefined for plain text — the router skips the magic-byte check
+    mockDetectMimeType.mockResolvedValueOnce(undefined);
+
+    const res = await request(app)
+      .post('/api/attachments/upload')
+      .set('Authorization', `Bearer ${VALID_TOKEN}`)
+      .attach('file', Buffer.from('hello world'), {
+        filename: 'notes.txt',
+        contentType: 'text/plain',
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.contentType).toBe('text/plain');
   });
 });

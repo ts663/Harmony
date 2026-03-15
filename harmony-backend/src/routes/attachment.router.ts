@@ -1,11 +1,16 @@
 import path from 'path';
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import express from 'express';
-import { requireAuth, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { requireAuth } from '../middleware/auth.middleware';
 import { storageProvider } from '../lib/storage';
 import { LocalStorageProvider } from '../lib/storage/local.provider';
-import { attachmentService, MAX_FILE_SIZE_BYTES } from '../services/attachment.service';
+import {
+  attachmentService,
+  AttachmentValidationError,
+  MAX_FILE_SIZE_BYTES,
+} from '../services/attachment.service';
+import { detectMimeType } from '../lib/mime-detect';
 
 export const attachmentRouter = Router();
 
@@ -39,19 +44,36 @@ attachmentRouter.post(
       }
 
       const { originalname, mimetype, buffer, size } = req.file;
-      const _userId = (req as AuthenticatedRequest).userId; // authenticated; logged for audit if needed
 
-      // Validate content-type and size
+      // Validate declared MIME type and size against whitelist before touching the buffer
       try {
         attachmentService.validateUpload(mimetype, size);
-      } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Validation failed';
-        res.status(400).json({ error: message });
-        return;
+      } catch (err) {
+        if (err instanceof AttachmentValidationError) {
+          res.status(400).json({ error: err.message });
+          return;
+        }
+        throw err;
+      }
+
+      // Magic-byte detection: verify actual file contents match the declared MIME type.
+      // Prevents a client from bypassing the whitelist by declaring "image/png" for a
+      // shell script or other malicious payload.
+      const detectedMime = await detectMimeType(buffer);
+
+      // text/plain has no magic bytes — file-type returns undefined for it.
+      // For all other whitelisted types, the detected MIME must match.
+      if (mimetype !== 'text/plain') {
+        if (!detectedMime || detectedMime !== mimetype) {
+          res.status(400).json({
+            error: `File content does not match declared type "${mimetype}"`,
+          });
+          return;
+        }
       }
 
       const result = await storageProvider.upload({
-        filename: path.basename(originalname), // strip any path from original name
+        filename: path.basename(originalname), // strip any path prefix from original name
         contentType: mimetype,
         data: buffer,
       });
@@ -68,6 +90,24 @@ attachmentRouter.post(
         res.status(500).json({ error: 'Internal server error' });
       }
     }
+  },
+);
+
+// ─── Multer error handler ────────────────────────────────────────────────────
+
+/**
+ * Catches multer-specific errors (e.g. LIMIT_FILE_SIZE) and maps them to
+ * appropriate 4xx responses before they reach the global 500 error handler.
+ */
+attachmentRouter.use(
+  '/upload',
+  (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
+    if (err instanceof multer.MulterError) {
+      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+      res.status(status).json({ error: err.message });
+      return;
+    }
+    next(err);
   },
 );
 
