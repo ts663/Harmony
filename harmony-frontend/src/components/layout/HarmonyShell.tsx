@@ -21,7 +21,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { useServerEvents } from '@/hooks/useServerEvents';
 import { useServerListSync } from '@/hooks/useServerListSync';
-import { ChannelType } from '@/types';
+import { ChannelType, ChannelVisibility } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
 import type { Server, Channel, Message, User } from '@/types';
@@ -249,6 +249,29 @@ export function HarmonyShell({
     setLocalMembers(prev => prev.filter(m => m.id !== userId));
   }, []);
 
+  // ── Real-time visibility changes ──────────────────────────────────────────
+
+  const handleChannelVisibilityChanged = useCallback(
+    (channel: Channel, oldVisibility: ChannelVisibility) => {
+      // Update the channel's visibility in the sidebar immediately.
+      setLocalChannels(prev => prev.map(c => (c.id === channel.id ? channel : c)));
+
+      // If the current user is viewing this channel and it became PRIVATE,
+      // they may have lost access. For unauthenticated (guest) users, redirect
+      // to the server root so VisibilityGuard can gate access on re-render.
+      // Authenticated users remain (the server handles their authorization).
+      if (
+        channel.id === currentChannel.id &&
+        oldVisibility !== ChannelVisibility.PRIVATE &&
+        channel.visibility === ChannelVisibility.PRIVATE &&
+        !isAuthenticated
+      ) {
+        router.push(`${basePath}/${currentServer.slug}`);
+      }
+    },
+    [currentChannel.id, isAuthenticated, basePath, currentServer.slug, router],
+  );
+
   useServerEvents({
     serverId: currentServer.id,
     onChannelCreated: handleChannelCreated,
@@ -256,6 +279,7 @@ export function HarmonyShell({
     onChannelDeleted: handleChannelDeleted,
     onMemberJoined: handleMemberJoined,
     onMemberLeft: handleMemberLeft,
+    onChannelVisibilityChanged: handleChannelVisibilityChanged,
     enabled: isAuthenticated,
   });
 

@@ -1,9 +1,10 @@
 /**
- * useServerEvents — Issue #185 / #186
+ * useServerEvents — Issue #185 / #186 / #187
  *
  * Subscribes to real-time SSE events for a server.
- * Handles channel list updates (created/updated/deleted) and member list
- * updates (joined/left) over the single /api/events/server/:serverId endpoint.
+ * Handles channel list updates (created/updated/deleted), member list
+ * updates (joined/left), and visibility changes over the single
+ * /api/events/server/:serverId endpoint.
  *
  * Uses the native EventSource API (no library needed).
  *
@@ -15,13 +16,14 @@
  *     onChannelDeleted: (id) => setChannels(prev => prev.filter(c => c.id !== id)),
  *     onMemberJoined: (user) => setMembers(prev => [...prev, user]),
  *     onMemberLeft: (userId) => setMembers(prev => prev.filter(m => m.id !== userId)),
+ *     onChannelVisibilityChanged: (ch, oldVis) => { ... },
  *   });
  */
 
 'use client';
 
 import { useEffect, useLayoutEffect, useRef } from 'react';
-import type { Channel } from '@/types/channel';
+import type { Channel, ChannelVisibility } from '@/types/channel';
 import type { User } from '@/types/user';
 import { getAccessToken } from '@/lib/api-client';
 
@@ -34,6 +36,12 @@ export interface UseServerEventsOptions {
   onMemberJoined?: (user: User) => void;
   /** Called with the userId when a member leaves or is kicked. Optional. */
   onMemberLeft?: (userId: string) => void;
+  /**
+   * Called when a channel's visibility changes. The updated channel object is
+   * provided along with the previous visibility so callers can detect access
+   * revocation (e.g. a PUBLIC channel became PRIVATE). Optional.
+   */
+  onChannelVisibilityChanged?: (channel: Channel, oldVisibility: ChannelVisibility) => void;
   /** Set to false to disable the connection (e.g. for unauthenticated guests). Defaults to true. */
   enabled?: boolean;
 }
@@ -45,6 +53,7 @@ export function useServerEvents({
   onChannelDeleted,
   onMemberJoined,
   onMemberLeft,
+  onChannelVisibilityChanged,
   enabled = true,
 }: UseServerEventsOptions): void {
   // Keep stable references to callbacks so the effect doesn't re-run on every render.
@@ -53,6 +62,7 @@ export function useServerEvents({
   const onDeletedRef = useRef(onChannelDeleted);
   const onMemberJoinedRef = useRef(onMemberJoined);
   const onMemberLeftRef = useRef(onMemberLeft);
+  const onVisibilityChangedRef = useRef(onChannelVisibilityChanged);
 
   useLayoutEffect(() => {
     onCreatedRef.current = onChannelCreated;
@@ -60,6 +70,7 @@ export function useServerEvents({
     onDeletedRef.current = onChannelDeleted;
     onMemberJoinedRef.current = onMemberJoined;
     onMemberLeftRef.current = onMemberLeft;
+    onVisibilityChangedRef.current = onChannelVisibilityChanged;
   });
 
   useEffect(() => {
@@ -117,11 +128,23 @@ export function useServerEvents({
       }
     };
 
+    const handleVisibilityChanged = (event: MessageEvent<string>) => {
+      try {
+        // The backend sends the full updated channel object plus oldVisibility.
+        const payload = JSON.parse(event.data) as Channel & { oldVisibility: ChannelVisibility };
+        const { oldVisibility, ...channel } = payload;
+        onVisibilityChangedRef.current?.(channel, oldVisibility);
+      } catch {
+        // Ignore malformed payloads
+      }
+    };
+
     es.addEventListener('channel:created', handleCreated);
     es.addEventListener('channel:updated', handleUpdated);
     es.addEventListener('channel:deleted', handleDeleted);
     es.addEventListener('member:joined', handleMemberJoined);
     es.addEventListener('member:left', handleMemberLeft);
+    es.addEventListener('channel:visibility-changed', handleVisibilityChanged);
 
     let everOpened = false;
 
@@ -141,6 +164,7 @@ export function useServerEvents({
       es.removeEventListener('channel:deleted', handleDeleted);
       es.removeEventListener('member:joined', handleMemberJoined);
       es.removeEventListener('member:left', handleMemberLeft);
+      es.removeEventListener('channel:visibility-changed', handleVisibilityChanged);
       es.close();
     };
   }, [serverId, enabled]);
