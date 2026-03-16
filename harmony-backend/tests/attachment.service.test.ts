@@ -10,10 +10,10 @@
  */
 
 import { PrismaClient } from '@prisma/client';
-import { TRPCError } from '@trpc/server';
 import {
   attachmentService,
   AttachmentValidationError,
+  AttachmentNotFoundError,
   ALLOWED_CONTENT_TYPES,
   MAX_FILE_SIZE_BYTES,
 } from '../src/services/attachment.service';
@@ -112,15 +112,13 @@ describe('attachmentService.validateUpload', () => {
   });
 
   it('throws AttachmentValidationError when file exceeds the 25 MB limit', () => {
-    expect(() =>
-      attachmentService.validateUpload('image/jpeg', MAX_FILE_SIZE_BYTES + 1),
-    ).toThrow(AttachmentValidationError);
+    expect(() => attachmentService.validateUpload('image/jpeg', MAX_FILE_SIZE_BYTES + 1)).toThrow(
+      AttachmentValidationError,
+    );
   });
 
   it('passes exactly at the size limit', () => {
-    expect(() =>
-      attachmentService.validateUpload('image/jpeg', MAX_FILE_SIZE_BYTES),
-    ).not.toThrow();
+    expect(() => attachmentService.validateUpload('image/jpeg', MAX_FILE_SIZE_BYTES)).not.toThrow();
   });
 
   it('allows all content types in the whitelist', () => {
@@ -151,26 +149,26 @@ describe('attachmentService.listByMessage', () => {
     await prisma.message.delete({ where: { id: bare.id } });
   });
 
-  it('throws NOT_FOUND for a nonexistent message ID', async () => {
+  it('throws AttachmentNotFoundError for a nonexistent message ID', async () => {
     await expect(
       attachmentService.listByMessage('00000000-0000-0000-0000-000000000000', serverId),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    ).rejects.toThrow(AttachmentNotFoundError);
   });
 
-  it('throws NOT_FOUND for a soft-deleted message', async () => {
+  it('throws AttachmentNotFoundError for a soft-deleted message', async () => {
     const deleted = await prisma.message.create({
       data: { channelId, authorId: userId, content: 'Deleted', isDeleted: true },
     });
-    await expect(attachmentService.listByMessage(deleted.id, serverId)).rejects.toMatchObject({
-      code: 'NOT_FOUND',
-    });
+    await expect(attachmentService.listByMessage(deleted.id, serverId)).rejects.toThrow(
+      AttachmentNotFoundError,
+    );
     await prisma.message.delete({ where: { id: deleted.id } });
   });
 
-  it('throws NOT_FOUND when messageId belongs to a different server (cross-server probe)', async () => {
+  it('throws AttachmentNotFoundError when messageId belongs to a different server (cross-server probe)', async () => {
     // messageId is in serverId's channel; passing otherServerId should be rejected
-    await expect(
-      attachmentService.listByMessage(messageId, otherServerId),
-    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    await expect(attachmentService.listByMessage(messageId, otherServerId)).rejects.toThrow(
+      AttachmentNotFoundError,
+    );
   });
 });

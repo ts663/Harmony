@@ -72,8 +72,13 @@ attachmentRouter.post(
         }
       }
 
+      // Sanitize the original filename to alphanumeric + dot + hyphen + underscore.
+      // path.basename alone strips path separators but still allows special chars
+      // that could appear misleading in the DB record or error messages.
+      const safeOriginalname = path.basename(originalname).replace(/[^a-zA-Z0-9._-]/g, '_');
+
       const result = await storageProvider.upload({
-        filename: path.basename(originalname), // strip any path prefix from original name
+        filename: safeOriginalname,
         contentType: mimetype,
         data: buffer,
       });
@@ -99,17 +104,15 @@ attachmentRouter.post(
  * Catches multer-specific errors (e.g. LIMIT_FILE_SIZE) and maps them to
  * appropriate 4xx responses before they reach the global 500 error handler.
  */
-attachmentRouter.use(
-  '/upload',
-  (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
-    if (err instanceof multer.MulterError) {
-      const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
-      res.status(status).json({ error: err.message });
-      return;
-    }
-    next(err);
-  },
-);
+// Unscoped so it catches errors from any route on this router, not just /upload.
+attachmentRouter.use((err: unknown, _req: Request, res: Response, next: NextFunction): void => {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    res.status(status).json({ error: err.message });
+    return;
+  }
+  next(err);
+});
 
 // ─── Local file serving (dev only) ───────────────────────────────────────────
 
