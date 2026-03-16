@@ -204,6 +204,7 @@ function OverviewSection({
 // This is a read-only reference view — roles are assigned at the server level,
 // not the channel level, so there is no mutation API needed here.
 
+// Must stay in sync with RoleType in harmony-backend/src/services/permission.service.ts
 type PermissionRole = 'OWNER' | 'ADMIN' | 'MODERATOR' | 'MEMBER' | 'GUEST';
 
 interface PermissionRow {
@@ -220,6 +221,8 @@ function hasPermission(role: PermissionRole, threshold: PermissionRole): boolean
   return ROLE_HIERARCHY.indexOf(role) <= ROLE_HIERARCHY.indexOf(threshold);
 }
 
+// Channel-scoped actions only. Server-level actions (e.g. manage members, delete server)
+// are intentionally omitted — they are not channel permissions and would be misleading here.
 const CHANNEL_PERMISSIONS: PermissionRow[] = [
   { label: 'View channel', allowedFrom: 'GUEST' },
   { label: 'Send messages', allowedFrom: 'MEMBER' },
@@ -230,8 +233,6 @@ const CHANNEL_PERMISSIONS: PermissionRow[] = [
   { label: 'Manage channel settings', allowedFrom: 'ADMIN' },
   { label: 'Manage channel visibility', allowedFrom: 'ADMIN' },
   { label: 'Create / delete channels', allowedFrom: 'ADMIN' },
-  { label: 'Manage server members', allowedFrom: 'ADMIN' },
-  { label: 'Delete server', allowedFrom: 'OWNER' },
 ];
 
 const ROLE_LABELS: Record<PermissionRole, string> = {
@@ -293,7 +294,10 @@ function PermissionsSection() {
           <thead>
             <tr className='border-b border-[#40444b] bg-[#2f3136]'>
               {/* Empty header for the action label column */}
-              <th className='px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400'>
+              <th
+                scope='col'
+                className='px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-gray-400'
+              >
                 Permission
               </th>
               {ROLE_HIERARCHY.map(role => (
@@ -314,18 +318,16 @@ function PermissionsSection() {
                 className={idx % 2 === 0 ? 'bg-[#36393f]' : 'bg-[#2f3136]'}
               >
                 <td className='px-4 py-2 text-gray-300'>{row.label}</td>
-                {ROLE_HIERARCHY.map(role => (
-                  <td key={role} className='px-3 py-2 text-center'>
-                    {hasPermission(role, row.allowedFrom) ? (
-                      <CheckIcon />
-                    ) : (
-                      <DashIcon />
-                    )}
-                    <span className='sr-only'>
-                      {hasPermission(role, row.allowedFrom) ? 'Allowed' : 'Not allowed'}
-                    </span>
-                  </td>
-                ))}
+                {ROLE_HIERARCHY.map(role => {
+                  // Compute once per cell to avoid redundant calls across the 11×5 matrix
+                  const allowed = hasPermission(role, row.allowedFrom);
+                  return (
+                    <td key={role} className='px-3 py-2 text-center'>
+                      {allowed ? <CheckIcon /> : <DashIcon />}
+                      <span className='sr-only'>{allowed ? 'Allowed' : 'Not allowed'}</span>
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
