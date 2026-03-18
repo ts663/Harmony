@@ -80,7 +80,7 @@ export async function trpcQuery<T>(
   try {
     res = await fetch(url.toString(), {
       headers,
-      next: { revalidate: 30 },
+      cache: 'no-store',
       signal: controller.signal,
     });
   } finally {
