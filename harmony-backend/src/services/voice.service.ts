@@ -109,9 +109,10 @@ export const voiceService = {
     }
 
     // Require synchronous require here — we already guard with isMockMode above.
+    // AccessToken is nested under twilio.jwt, not at the top level of the module.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const twilio = require('twilio');
-    const { AccessToken } = twilio;
+    const AccessToken = twilio.jwt.AccessToken;
     const { VideoGrant } = AccessToken;
 
     const token = new AccessToken(
