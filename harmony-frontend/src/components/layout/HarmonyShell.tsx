@@ -6,7 +6,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
+import { useState, useEffect, useCallback, useMemo, useSyncExternalStore } from 'react';
 import { cn } from '@/lib/utils';
 import { TopBar } from '@/components/channel/TopBar';
 import { MembersSidebar } from '@/components/channel/MembersSidebar';
@@ -99,6 +99,11 @@ export function HarmonyShell({
   }
   // Local channels state so newly created channels appear immediately in the sidebar.
   const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  // Stable list of voice channel IDs for VoiceProvider — recomputed only when channels change.
+  const voiceChannelIds = useMemo(
+    () => localChannels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
+    [localChannels],
+  );
   // Track the channels prop reference so localChannels resets whenever the server
   // passes a fresh array (server navigation or revalidatePath refresh) — same
   // render-time derivation pattern used above for localMessages/prevChannelId.
@@ -189,7 +194,7 @@ export function HarmonyShell({
   }, []);
 
   return (
-    <VoiceProvider>
+    <VoiceProvider serverId={currentServer.id} voiceChannelIds={voiceChannelIds}>
       <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
       {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
       <a

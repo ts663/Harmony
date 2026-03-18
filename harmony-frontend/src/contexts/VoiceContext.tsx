@@ -12,6 +12,8 @@
  *   provide real-time updates for the connected channel only.
  * - On unmount, the Twilio room is disconnected and a fire-and-forget
  *   voice.leave is sent so Redis presence stays in sync when navigating away.
+ * - channelParticipants holds participant lists for ALL voice channels in the
+ *   server, fetched on mount, so the sidebar shows presence before joining.
  */
 
 'use client';
@@ -26,6 +28,7 @@ import {
   type ReactNode,
 } from 'react';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/hooks/useToast';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -47,6 +50,12 @@ export interface VoiceContextValue {
   connectedChannelName: string | null;
   /** Participants currently in the connected channel. */
   participants: VoiceParticipant[];
+  /**
+   * Participant lists for every voice channel in the current server.
+   * Keyed by channelId. Updated on mount and kept in sync with Twilio
+   * room events for the connected channel.
+   */
+  channelParticipants: Record<string, VoiceParticipant[]>;
   /** Identity (userId) of the current dominant speaker, or null. */
   dominantSpeakerId: string | null;
   isMuted: boolean;
@@ -69,12 +78,32 @@ export function useVoice(): VoiceContextValue {
   return ctx;
 }
 
+/**
+ * Returns VoiceContextValue when inside a VoiceProvider, or null otherwise.
+ * Use this in components that may render outside the voice provider tree
+ * (unit tests, Storybook stories, future routes without the full shell).
+ */
+export function useVoiceOptional(): VoiceContextValue | null {
+  return useContext(VoiceContext);
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
-export function VoiceProvider({ children }: { children: ReactNode }) {
+interface VoiceProviderProps {
+  children: ReactNode;
+  /** The current server's UUID — used to scope getParticipants fetches. */
+  serverId: string;
+  /** IDs of all voice channels in the current server. */
+  voiceChannelIds: string[];
+}
+
+export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProviderProps) {
+  const { showToast } = useToast();
+
   const [connectedChannelId, setConnectedChannelId] = useState<string | null>(null);
   const [connectedChannelName, setConnectedChannelName] = useState<string | null>(null);
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
+  const [channelParticipants, setChannelParticipants] = useState<Record<string, VoiceParticipant[]>>({});
   const [dominantSpeakerId, setDominantSpeakerId] = useState<string | null>(null);
   const [isMuted, setIsMutedState] = useState(false);
   const [isDeafened, setIsDeafenedState] = useState(false);
@@ -87,14 +116,35 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const connectedServerIdRef = useRef<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const localAudioTrackRef = useRef<any>(null);
+  const localParticipantIdentityRef = useRef<string | null>(null);
   const isMutedRef = useRef(false);
   const isDeafenedRef = useRef(false);
+
+  // ── Fetch participant lists for all voice channels on mount / server change ──
+  // This populates the sidebar before the user has joined any channel.
+  useEffect(() => {
+    if (!serverId || voiceChannelIds.length === 0) return;
+    void Promise.all(
+      voiceChannelIds.map(channelId =>
+        apiClient
+          .trpcQuery<VoiceParticipant[]>('voice.getParticipants', { serverId, channelId })
+          .then(ps => setChannelParticipants(prev => ({ ...prev, [channelId]: ps })))
+          .catch((err: unknown) => {
+            console.error(
+              '[VoiceContext] getParticipants error for', channelId,
+              err instanceof Error ? err.message : err,
+            );
+          }),
+      ),
+    );
+  }, [serverId, voiceChannelIds]);
 
   const resetVoiceState = useCallback(() => {
     connectedChannelIdRef.current = null;
     connectedServerIdRef.current = null;
     roomRef.current = null;
     localAudioTrackRef.current = null;
+    localParticipantIdentityRef.current = null;
     setConnectedChannelId(null);
     setConnectedChannelName(null);
     setParticipants([]);
@@ -156,6 +206,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setConnectedChannelId(channelId);
         setConnectedChannelName(channelName);
         setParticipants(initialParticipants);
+        // Keep the all-channels map in sync for the newly joined channel.
+        setChannelParticipants(prev => ({ ...prev, [channelId]: initialParticipants }));
 
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
@@ -167,6 +219,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         });
         roomRef.current = room;
 
+        // Store local identity so setMuted/setDeafened can update the participant entry.
+        localParticipantIdentityRef.current = room.localParticipant.identity;
+
         // Cache local audio track for mute toggling.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.localParticipant.audioTracks.forEach((pub: any) => {
@@ -176,20 +231,30 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // Merge remote participants already in the room.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.participants.forEach((participant: any) => {
+          const newEntry: VoiceParticipant = { userId: participant.identity, muted: false, deafened: false };
           setParticipants(prev =>
-            prev.some(p => p.userId === participant.identity)
-              ? prev
-              : [...prev, { userId: participant.identity, muted: false, deafened: false }],
+            prev.some(p => p.userId === participant.identity) ? prev : [...prev, newEntry],
           );
+          setChannelParticipants(prev => {
+            const list = prev[channelId] ?? [];
+            return list.some(p => p.userId === participant.identity)
+              ? prev
+              : { ...prev, [channelId]: [...list, newEntry] };
+          });
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.on('participantConnected', (participant: any) => {
+          const newEntry: VoiceParticipant = { userId: participant.identity, muted: false, deafened: false };
           setParticipants(prev =>
-            prev.some(p => p.userId === participant.identity)
-              ? prev
-              : [...prev, { userId: participant.identity, muted: false, deafened: false }],
+            prev.some(p => p.userId === participant.identity) ? prev : [...prev, newEntry],
           );
+          setChannelParticipants(prev => {
+            const list = prev[channelId] ?? [];
+            return list.some(p => p.userId === participant.identity)
+              ? prev
+              : { ...prev, [channelId]: [...list, newEntry] };
+          });
           // Apply current deafen state to already-subscribed tracks on the new participant.
           if (isDeafenedRef.current) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -211,6 +276,10 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         room.on('participantDisconnected', (participant: any) => {
           setParticipants(prev => prev.filter(p => p.userId !== participant.identity));
+          setChannelParticipants(prev => ({
+            ...prev,
+            [channelId]: (prev[channelId] ?? []).filter(p => p.userId !== participant.identity),
+          }));
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -219,16 +288,15 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         });
 
         // Handle unexpected disconnects (network drop, room ended, etc.)
-        // Remove all listeners before resetting state so no events fire during teardown.
         // Capture refs before resetVoiceState clears them.
         room.on('disconnected', () => {
-          const channelId = connectedChannelIdRef.current;
-          const serverId = connectedServerIdRef.current;
+          const cId = connectedChannelIdRef.current;
+          const sId = connectedServerIdRef.current;
           room.removeAllListeners();
           resetVoiceState();
           // Fire-and-forget: keep Redis in sync on unexpected disconnect.
-          if (channelId && serverId) {
-            apiClient.trpcMutation('voice.leave', { channelId, serverId }).catch((err: unknown) => {
+          if (cId && sId) {
+            apiClient.trpcMutation('voice.leave', { channelId: cId, serverId: sId }).catch((err: unknown) => {
               console.error('[VoiceContext] disconnect leave error:', err instanceof Error ? err.message : err);
             });
           }
@@ -236,6 +304,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('[VoiceContext] joinChannel error:', message);
+        showToast({ message: 'Could not connect to voice channel. Please try again.', type: 'error' });
         // If voice.join succeeded (refs were written) but Twilio connect failed,
         // notify the backend so Redis state is not left stale.
         if (connectedChannelIdRef.current) {
@@ -247,7 +316,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         setJoining(false);
       }
     },
-    [leaveChannel, resetVoiceState],
+    [leaveChannel, resetVoiceState, showToast],
   );
 
   const setMuted = useCallback(async (muted: boolean) => {
@@ -260,7 +329,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     isMutedRef.current = muted;
     setIsMutedState(muted);
 
+    // Optimistically update the local user's entry in both participant lists.
+    const localIdentity = localParticipantIdentityRef.current;
     const channelId = connectedChannelIdRef.current;
+    if (localIdentity) {
+      setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, muted } : p));
+      if (channelId) {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).map(p =>
+            p.userId === localIdentity ? { ...p, muted } : p,
+          ),
+        }));
+      }
+    }
+
     const serverId = connectedServerIdRef.current;
     if (channelId && serverId) {
       try {
@@ -271,13 +354,24 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           deafened: isDeafenedRef.current,
         });
       } catch (err) {
-        // Revert optimistic update so UI matches actual state.
+        // Revert optimistic updates so UI matches actual state.
         if (track) {
           if (!muted) track.disable();
           else track.enable();
         }
         isMutedRef.current = !muted;
         setIsMutedState(!muted);
+        if (localIdentity) {
+          setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, muted: !muted } : p));
+          if (channelId) {
+            setChannelParticipants(prev => ({
+              ...prev,
+              [channelId]: (prev[channelId] ?? []).map(p =>
+                p.userId === localIdentity ? { ...p, muted: !muted } : p,
+              ),
+            }));
+          }
+        }
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('[VoiceContext] updateState (mute) error:', message);
       }
@@ -303,7 +397,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     isDeafenedRef.current = deafened;
     setIsDeafenedState(deafened);
 
+    // Optimistically update the local user's entry in both participant lists.
+    const localIdentity = localParticipantIdentityRef.current;
     const channelId = connectedChannelIdRef.current;
+    if (localIdentity) {
+      setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, deafened } : p));
+      if (channelId) {
+        setChannelParticipants(prev => ({
+          ...prev,
+          [channelId]: (prev[channelId] ?? []).map(p =>
+            p.userId === localIdentity ? { ...p, deafened } : p,
+          ),
+        }));
+      }
+    }
+
     const serverId = connectedServerIdRef.current;
     if (channelId && serverId) {
       try {
@@ -314,10 +422,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
           deafened,
         });
       } catch (err) {
-        // Revert optimistic update so audio state matches actual.
+        // Revert optimistic updates so audio state matches actual.
         applyDeafenToRoom(!deafened);
         isDeafenedRef.current = !deafened;
         setIsDeafenedState(!deafened);
+        if (localIdentity) {
+          setParticipants(prev => prev.map(p => p.userId === localIdentity ? { ...p, deafened: !deafened } : p));
+          if (channelId) {
+            setChannelParticipants(prev => ({
+              ...prev,
+              [channelId]: (prev[channelId] ?? []).map(p =>
+                p.userId === localIdentity ? { ...p, deafened: !deafened } : p,
+              ),
+            }));
+          }
+        }
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('[VoiceContext] updateState (deafen) error:', message);
       }
@@ -351,6 +470,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         connectedChannelId,
         connectedChannelName,
         participants,
+        channelParticipants,
         dominantSpeakerId,
         isMuted,
         isDeafened,

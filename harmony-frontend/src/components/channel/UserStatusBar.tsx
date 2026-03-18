@@ -16,7 +16,7 @@ import Link from 'next/link';
 import Image from 'next/image';
 import type { User, UserStatus } from '@/types';
 import { cn } from '@/lib/utils';
-import { useVoice } from '@/contexts/VoiceContext';
+import { useVoiceOptional } from '@/contexts/VoiceContext';
 
 // ─── Status colour map ────────────────────────────────────────────────────────
 
@@ -43,15 +43,11 @@ export interface UserStatusBarProps {
 
 export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarProps) {
   const pathname = usePathname();
-  const {
-    connectedChannelName,
-    connectedChannelId,
-    isMuted,
-    isDeafened,
-    setMuted,
-    setDeafened,
-    leaveChannel,
-  } = useVoice();
+  const voice = useVoiceOptional();
+  const connectedChannelName = voice?.connectedChannelName ?? null;
+  const connectedChannelId = voice?.connectedChannelId ?? null;
+  const isMuted = voice?.isMuted ?? false;
+  const isDeafened = voice?.isDeafened ?? false;
 
   const isInVoice = connectedChannelId !== null;
 
@@ -69,7 +65,7 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
           </div>
           <button
             type='button'
-            onClick={() => { void leaveChannel(); }}
+            onClick={() => { if (voice) void voice.leaveChannel(); }}
             title='Disconnect from voice'
             aria-label='Disconnect from voice channel'
             className='ml-2 flex-shrink-0 rounded p-1 text-red-400 hover:bg-red-500/10 hover:text-red-300'
@@ -119,7 +115,7 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
       <div className='flex flex-shrink-0 items-center'>
         {/* Mic toggle — only functional when connected to a voice channel */}
         <button
-          onClick={() => { void setMuted(!isMuted); }}
+          onClick={() => { if (voice) void voice.setMuted(!isMuted); }}
           disabled={!isInVoice}
           title={isMuted ? 'Unmute' : 'Mute'}
           aria-label={isMuted ? 'Unmute' : 'Mute'}
@@ -151,7 +147,7 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
 
         {/* Headphone toggle — only functional when connected to a voice channel */}
         <button
-          onClick={() => { void setDeafened(!isDeafened); }}
+          onClick={() => { if (voice) void voice.setDeafened(!isDeafened); }}
           disabled={!isInVoice}
           title={isDeafened ? 'Undeafen' : 'Deafen'}
           aria-label={isDeafened ? 'Undeafen' : 'Deafen'}

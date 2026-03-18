@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 import { UserStatusBar } from '@/components/channel/UserStatusBar';
 import { ChannelVisibility, ChannelType } from '@/types';
 import type { Server, Channel, User } from '@/types';
-import { useVoice } from '@/contexts/VoiceContext';
+import { useVoiceOptional } from '@/contexts/VoiceContext';
 
 // ─── Colour tokens (Discord palette) ─────────────────────────────────────────
 
@@ -181,7 +181,12 @@ export function ChannelSidebar({
   const [textCollapsed, setTextCollapsed] = useState(false);
   const [voiceCollapsed, setVoiceCollapsed] = useState(false);
 
-  const { connectedChannelId, participants, dominantSpeakerId, joining, joinChannel } = useVoice();
+  const voice = useVoiceOptional();
+  const connectedChannelId = voice?.connectedChannelId ?? null;
+  const allChannelParticipants = voice?.channelParticipants ?? {};
+  const dominantSpeakerId = voice?.dominantSpeakerId ?? null;
+  const joining = voice?.joining ?? false;
+  const joinChannel = voice?.joinChannel;
 
   // Precompute userId → User map to avoid O(members × participants) lookups on every render.
   const memberMap = useMemo(
@@ -316,7 +321,7 @@ export function ChannelSidebar({
                         disabled={!isAuthenticated || joining}
                         aria-disabled={!isAuthenticated || joining}
                         onClick={() => {
-                          void joinChannel(channel.id, serverId, channel.name);
+                          if (joinChannel) void joinChannel(channel.id, serverId, channel.name);
                         }}
                         className={cn(
                           'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
@@ -329,10 +334,9 @@ export function ChannelSidebar({
                         <ChannelIcon type={channel.type} />
                         <span className='flex-1 truncate text-left'>{channel.name}</span>
                       </button>
-                      {/* Participant list for this voice channel */}
+                      {/* Participant list for this voice channel — from all-channels map */}
                       {(() => {
-                        const channelParticipants =
-                          connectedChannelId === channel.id ? participants : [];
+                        const channelParticipants = allChannelParticipants[channel.id] ?? [];
                         if (channelParticipants.length === 0) return null;
                         return (
                           <ul className='mb-1 ml-4 list-none space-y-0.5'>
