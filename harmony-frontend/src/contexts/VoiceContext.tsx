@@ -58,6 +58,8 @@ export interface VoiceContextValue {
   channelParticipants: Record<string, VoiceParticipant[]>;
   /** Identity (userId) of the current dominant speaker, or null. */
   dominantSpeakerId: string | null;
+  /** True when the local user's mic level exceeds the speaking threshold. */
+  localSpeaking: boolean;
   isMuted: boolean;
   isDeafened: boolean;
   /** True while the join tRPC call + Twilio connect is in progress. */
@@ -105,6 +107,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
   const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
   const [channelParticipants, setChannelParticipants] = useState<Record<string, VoiceParticipant[]>>({});
   const [dominantSpeakerId, setDominantSpeakerId] = useState<string | null>(null);
+  const [localSpeaking, setLocalSpeaking] = useState(false);
   const [isMuted, setIsMutedState] = useState(false);
   const [isDeafened, setIsDeafenedState] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -119,6 +122,13 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
   const localParticipantIdentityRef = useRef<string | null>(null);
   const isMutedRef = useRef(false);
   const isDeafenedRef = useRef(false);
+
+  // Web Audio API refs for local speaking detection.
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const speakingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const speakingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localSpeakingRef = useRef(false);
 
   // ── Fetch participant lists for all voice channels on mount / server change ──
   // This populates the sidebar before the user has joined any channel.
@@ -153,6 +163,22 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
     setIsDeafenedState(false);
     isMutedRef.current = false;
     isDeafenedRef.current = false;
+    // Stop local audio level detection.
+    if (speakingIntervalRef.current !== null) {
+      clearInterval(speakingIntervalRef.current);
+      speakingIntervalRef.current = null;
+    }
+    if (speakingTimeoutRef.current !== null) {
+      clearTimeout(speakingTimeoutRef.current);
+      speakingTimeoutRef.current = null;
+    }
+    if (audioContextRef.current) {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    localSpeakingRef.current = false;
+    setLocalSpeaking(false);
   }, []);
 
   const leaveChannel = useCallback(async () => {
@@ -238,6 +264,50 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         room.localParticipant.audioTracks.forEach((pub: any) => {
           if (pub.track) localAudioTrackRef.current = pub.track;
         });
+
+        // Start local audio level detection for the speaking ring.
+        // Web Audio API is used instead of relying solely on Twilio's dominantSpeakerChanged,
+        // which requires multiple participants and doesn't fire for the local user alone.
+        const mediaTrack = (localAudioTrackRef.current as { mediaStreamTrack?: MediaStreamTrack } | null)
+          ?.mediaStreamTrack;
+        if (mediaTrack) {
+          try {
+            const ctx = new AudioContext();
+            const source = ctx.createMediaStreamSource(new MediaStream([mediaTrack]));
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            analyser.smoothingTimeConstant = 0.4;
+            source.connect(analyser);
+            audioContextRef.current = ctx;
+            analyserRef.current = analyser;
+
+            const buffer = new Uint8Array(analyser.frequencyBinCount);
+            // Threshold of 15 (0-255 byte frequency data) distinguishes speech from ambient noise.
+            const SPEAKING_THRESHOLD = 15;
+
+            speakingIntervalRef.current = setInterval(() => {
+              if (!analyserRef.current) return;
+              analyserRef.current.getByteFrequencyData(buffer);
+              const avg = buffer.reduce((s, v) => s + v, 0) / buffer.length;
+              if (avg > SPEAKING_THRESHOLD) {
+                if (!localSpeakingRef.current) {
+                  localSpeakingRef.current = true;
+                  setLocalSpeaking(true);
+                }
+                // Debounce the stop so the ring doesn't flicker between syllables.
+                if (speakingTimeoutRef.current !== null) clearTimeout(speakingTimeoutRef.current);
+                speakingTimeoutRef.current = setTimeout(() => {
+                  localSpeakingRef.current = false;
+                  setLocalSpeaking(false);
+                  speakingTimeoutRef.current = null;
+                }, 500);
+              }
+            }, 100);
+          } catch (e) {
+            console.error('[VoiceContext] audio level detection setup error:', e);
+          }
+        }
+
 
         // Merge remote participants already in the room.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -497,6 +567,7 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         participants,
         channelParticipants,
         dominantSpeakerId,
+        localSpeaking,
         isMuted,
         isDeafened,
         joining,

@@ -186,6 +186,7 @@ export function ChannelSidebar({
   const connectedChannelId = voice?.connectedChannelId ?? null;
   const allChannelParticipants = voice?.channelParticipants ?? {};
   const dominantSpeakerId = voice?.dominantSpeakerId ?? null;
+  const localSpeaking = voice?.localSpeaking ?? false;
   const joining = voice?.joining ?? false;
   const joinChannel = voice?.joinChannel;
 
@@ -346,7 +347,10 @@ export function ChannelSidebar({
                               const displayName =
                                 member?.displayName ?? member?.username ?? p.userId.slice(0, 8);
                               const initial = (displayName[0] ?? '?').toUpperCase();
-                              const isSpeaking = dominantSpeakerId === p.userId;
+                              // Show ring for Twilio's dominant speaker OR when local mic level is high.
+                              const isSpeaking =
+                                dominantSpeakerId === p.userId ||
+                                (localSpeaking && p.userId === currentUser.id);
                               return (
                                 <li
                                   key={p.userId}
