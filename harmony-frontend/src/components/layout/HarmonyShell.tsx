@@ -190,7 +190,7 @@ export function HarmonyShell({
 
   return (
     <VoiceProvider>
-    <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
+      <div className='flex h-screen overflow-hidden bg-[#202225] font-sans'>
       {/* Skip-to-content: visually hidden, appears on keyboard focus (WCAG 2.4.1) */}
       <a
         href='#main-content'
@@ -317,7 +317,7 @@ export function HarmonyShell({
           onClose={() => setIsCreateChannelOpen(false)}
         />
       )}
-    </div>
+      </div>
     </VoiceProvider>
   );
 }

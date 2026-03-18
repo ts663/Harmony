@@ -2,7 +2,8 @@
  * Component: UserStatusBar
  * Discord-style user info bar shown at the bottom of the ChannelSidebar.
  * Displays avatar, username, discriminator tag, status indicator,
- * mic/headphone toggles (visual-only), and a settings gear icon.
+ * mic/headphone toggles (wired to VoiceContext — affect real Twilio tracks when in voice),
+ * and a settings gear icon.
  *
  * Pulls current user from the parent via props (sourced from mock auth service).
  * Ref: Issue #28
@@ -116,12 +117,13 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
 
       {/* Action icons */}
       <div className='flex flex-shrink-0 items-center'>
-        {/* Mic toggle */}
+        {/* Mic toggle — only functional when connected to a voice channel */}
         <button
           onClick={() => { void setMuted(!isMuted); }}
+          disabled={!isInVoice}
           title={isMuted ? 'Unmute' : 'Mute'}
           aria-label={isMuted ? 'Unmute' : 'Mute'}
-          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white'
+          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400'
         >
           {isMuted ? (
             <svg
@@ -147,12 +149,13 @@ export function UserStatusBar({ currentUser, isAuthenticated }: UserStatusBarPro
           )}
         </button>
 
-        {/* Headphone toggle */}
+        {/* Headphone toggle — only functional when connected to a voice channel */}
         <button
           onClick={() => { void setDeafened(!isDeafened); }}
+          disabled={!isInVoice}
           title={isDeafened ? 'Undeafen' : 'Deafen'}
           aria-label={isDeafened ? 'Undeafen' : 'Deafen'}
-          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white'
+          className='rounded p-1 text-gray-400 hover:bg-[#3a3c41] hover:text-white disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400'
         >
           {isDeafened ? (
             <svg

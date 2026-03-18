@@ -10,8 +10,8 @@
  * - Backend tRPC calls (join/leave/updateState) keep Redis state in sync.
  * - Room events (participantConnected/Disconnected, dominantSpeakerChanged)
  *   provide real-time updates for the connected channel only.
- * - leaveChannel is called automatically on unmount so navigating away
- *   cleans up the Twilio room correctly.
+ * - On unmount, the Twilio room is disconnected and a fire-and-forget
+ *   voice.leave is sent so Redis presence stays in sync when navigating away.
  */
 
 'use client';
@@ -135,26 +135,27 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       // Already connected to the same channel — no-op.
       if (connectedChannelIdRef.current === channelId) return;
 
+      // Set joining immediately to prevent concurrent joinChannel calls during the leave.
+      setJoining(true);
+
       // Switching channels — leave first.
       if (connectedChannelIdRef.current) {
         await leaveChannel();
       }
-
-      setJoining(true);
       try {
         const { token, participants: initialParticipants } =
           await apiClient.trpcMutation<JoinResponse>('voice.join', { channelId, serverId });
+
+        // Validate token before writing any state to avoid a brief render with stale channel info.
+        if (!token) {
+          throw new Error('voice.join returned an empty token');
+        }
 
         connectedChannelIdRef.current = channelId;
         connectedServerIdRef.current = serverId;
         setConnectedChannelId(channelId);
         setConnectedChannelName(channelName);
         setParticipants(initialParticipants);
-
-        // Validate token before passing to Twilio to avoid SDK errors leaking internals.
-        if (!token) {
-          throw new Error('voice.join returned an empty token');
-        }
 
         // Dynamic import keeps the Twilio SDK out of SSR.
         const TwilioVideo = await import('twilio-video');
@@ -189,6 +190,22 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
               ? prev
               : [...prev, { userId: participant.identity, muted: false, deafened: false }],
           );
+          // Apply current deafen state to already-subscribed tracks on the new participant.
+          if (isDeafenedRef.current) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            participant.audioTracks.forEach((pub: any) => {
+              if (pub.track?.mediaStreamTrack) {
+                pub.track.mediaStreamTrack.enabled = false;
+              }
+            });
+          }
+          // Also handle tracks subscribed after the participant connected.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          participant.on('trackSubscribed', (track: any) => {
+            if (track.kind === 'audio' && track.mediaStreamTrack) {
+              track.mediaStreamTrack.enabled = !isDeafenedRef.current;
+            }
+          });
         });
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -203,14 +220,29 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
         // Handle unexpected disconnects (network drop, room ended, etc.)
         // Remove all listeners before resetting state so no events fire during teardown.
+        // Capture refs before resetVoiceState clears them.
         room.on('disconnected', () => {
+          const channelId = connectedChannelIdRef.current;
+          const serverId = connectedServerIdRef.current;
           room.removeAllListeners();
           resetVoiceState();
+          // Fire-and-forget: keep Redis in sync on unexpected disconnect.
+          if (channelId && serverId) {
+            apiClient.trpcMutation('voice.leave', { channelId, serverId }).catch((err: unknown) => {
+              console.error('[VoiceContext] disconnect leave error:', err instanceof Error ? err.message : err);
+            });
+          }
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Unknown error';
         console.error('[VoiceContext] joinChannel error:', message);
-        resetVoiceState();
+        // If voice.join succeeded (refs were written) but Twilio connect failed,
+        // notify the backend so Redis state is not left stale.
+        if (connectedChannelIdRef.current) {
+          await leaveChannel();
+        } else {
+          resetVoiceState();
+        }
       } finally {
         setJoining(false);
       }
@@ -296,9 +328,19 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return () => {
       const room = roomRef.current;
+      const channelId = connectedChannelIdRef.current;
+      const serverId = connectedServerIdRef.current;
       if (room) {
+        room.removeAllListeners();
         room.disconnect();
         roomRef.current = null;
+      }
+      // Fire-and-forget: keep Redis in sync when navigating away.
+      // Cannot await in a cleanup function, so errors are logged only.
+      if (channelId && serverId) {
+        apiClient.trpcMutation('voice.leave', { channelId, serverId }).catch((err: unknown) => {
+          console.error('[VoiceContext] unmount leave error:', err instanceof Error ? err.message : err);
+        });
       }
     };
   }, []);

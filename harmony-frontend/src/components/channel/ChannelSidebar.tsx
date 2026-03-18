@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { UserStatusBar } from '@/components/channel/UserStatusBar';
@@ -183,6 +183,12 @@ export function ChannelSidebar({
 
   const { connectedChannelId, participants, dominantSpeakerId, joining, joinChannel } = useVoice();
 
+  // Precompute userId → User map to avoid O(members × participants) lookups on every render.
+  const memberMap = useMemo(
+    () => new Map(members?.map(m => [m.id, m]) ?? []),
+    [members],
+  );
+
   const isAdmin =
     isAuthenticated && (currentUser.isSystemAdmin || currentUser.id === server.ownerId);
 
@@ -307,11 +313,10 @@ export function ChannelSidebar({
                     <li key={channel.id}>
                       <button
                         type='button'
-                        disabled={joining}
+                        disabled={!isAuthenticated || joining}
+                        aria-disabled={!isAuthenticated || joining}
                         onClick={() => {
-                          if (isAuthenticated) {
-                            void joinChannel(channel.id, serverId, channel.name);
-                          }
+                          void joinChannel(channel.id, serverId, channel.name);
                         }}
                         className={cn(
                           'group flex w-full items-center gap-1.5 rounded px-2 py-1 text-sm transition-colors',
@@ -332,7 +337,7 @@ export function ChannelSidebar({
                         return (
                           <ul className='mb-1 ml-4 list-none space-y-0.5'>
                             {channelParticipants.map(p => {
-                              const member = members?.find(m => m.id === p.userId);
+                              const member = memberMap.get(p.userId);
                               const displayName =
                                 member?.displayName ?? member?.username ?? p.userId.slice(0, 8);
                               const isSpeaking = dominantSpeakerId === p.userId;
