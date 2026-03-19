@@ -395,9 +395,11 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         // Distinguish getUserMedia device errors from Twilio server errors for actionable toasts.
         const isDeviceError =
           err instanceof DOMException &&
-          (err.name === 'NotFoundError' || err.name === 'NotReadableError' || err.name === 'OverconstrainedError');
+          (err.name === 'NotFoundError' || err.name === 'NotReadableError' || err.name === 'OverconstrainedError' || err.name === 'NotAllowedError');
         const toastMessage = isDeviceError
-          ? 'Microphone not found. Check System Settings → Privacy & Security → Microphone and grant access to your browser.'
+          ? err instanceof DOMException && err.name === 'NotAllowedError'
+            ? 'Microphone access denied. Click the lock icon in your address bar and allow microphone permission, then try again.'
+            : 'Microphone not found. Check System Settings → Privacy & Security → Microphone and grant access to your browser.'
           : 'Could not connect to voice channel. Please try again.';
         showToast({ message: toastMessage, type: 'error' });
         // If voice.join succeeded (refs were written) but Twilio connect failed,
