@@ -27,7 +27,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, getAccessToken } from '@/lib/api-client';
 import { useToast } from '@/hooks/useToast';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -611,6 +611,29 @@ export function VoiceProvider({ children, serverId, voiceChannelIds }: VoiceProv
         });
       }
     };
+  }, []);
+
+  // On tab/browser close, React cleanup functions do not run. Use a keepalive fetch
+  // so the browser keeps the voice.leave request alive through unload.
+  // fetch with keepalive: true supports custom headers (unlike navigator.sendBeacon).
+  useEffect(() => {
+    function handleBeforeUnload() {
+      const channelId = connectedChannelIdRef.current;
+      const serverId = connectedServerIdRef.current;
+      const token = getAccessToken();
+      if (!channelId || !serverId || !token) return;
+
+      const baseUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
+      fetch(`${baseUrl}/trpc/voice.leave`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ channelId, serverId }),
+        keepalive: true,
+      }).catch(() => { /* fire-and-forget */ });
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, []);
 
   return (
