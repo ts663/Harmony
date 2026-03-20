@@ -152,6 +152,15 @@ export interface VisibilityGuardProps {
    * the direct-URL access path that the real-time SSE redirect cannot guard.
    */
   serverOwnerId?: string;
+  /**
+   * Whether the current authenticated user has admin or owner role within this
+   * server, derived from the server-scoped member list. This is required because
+   * isAdmin() with no arg checks AuthContext user.role, which is always 'member'
+   * for non-system-admin users (mapBackendUser sets role: 'member' for everyone
+   * except system admins). Passing this prop lets VisibilityGuard correctly allow
+   * access for server admins when viewing PRIVATE channels directly by URL.
+   */
+  isServerAdmin?: boolean;
   /** Content to render when the channel is accessible */
   children: React.ReactNode;
 }
@@ -161,6 +170,7 @@ export function VisibilityGuard({
   isLoading,
   error,
   serverOwnerId,
+  isServerAdmin,
   children,
 }: VisibilityGuardProps) {
   const { isAuthenticated, isLoading: isAuthLoading, isAdmin } = useAuth();
@@ -194,7 +204,11 @@ export function VisibilityGuard({
     // Admins and the server owner retain access. This guards the direct-URL
     // path: a non-admin member who navigates to a PRIVATE channel URL after
     // the real-time SSE redirect was missed will be blocked here.
-    const userIsAdminOrOwner = isAdmin(serverOwnerId) || isAdmin();
+    // isAdmin(serverOwnerId) covers the server owner and system admins.
+    // isServerAdmin is the server-scoped member role passed from the parent,
+    // because isAdmin() with no arg checks AuthContext user.role which is always
+    // 'member' for non-system-admin users (mapBackendUser hardcodes this).
+    const userIsAdminOrOwner = isAdmin(serverOwnerId) || isServerAdmin;
     if (!userIsAdminOrOwner) {
       return <AccessDeniedPage />;
     }

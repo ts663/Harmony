@@ -264,9 +264,15 @@ export function HarmonyShell({
       // callback only fires for authenticated sessions.
       //
       // checkIsAdmin(ownerId) covers the server owner and system admins.
-      // checkIsAdmin() (no arg) covers users whose server-scoped role is 'owner'
-      // or 'admin' — non-owner admins whose role is populated from the member list.
-      const userIsAdminOrOwner = checkIsAdmin(currentServer.ownerId) || checkIsAdmin();
+      // We look up the member record for the current user to check their
+      // server-scoped role ('owner'/'admin') because checkIsAdmin() with no arg
+      // checks AuthContext user.role, which is always 'member' for non-system-admin
+      // users (mapBackendUser sets role: 'member' for all non-system-admin users).
+      const memberRecord = localMembers.find(m => m.id === authUser?.id);
+      const userIsAdminOrOwner =
+        checkIsAdmin(currentServer.ownerId) ||
+        memberRecord?.role === 'owner' ||
+        memberRecord?.role === 'admin';
       if (
         channel.id === currentChannel.id &&
         oldVisibility !== ChannelVisibility.PRIVATE &&
@@ -276,7 +282,7 @@ export function HarmonyShell({
         router.push(`${basePath}/${currentServer.slug}`);
       }
     },
-    [currentChannel.id, checkIsAdmin, currentServer.ownerId, basePath, currentServer.slug, router],
+    [currentChannel.id, checkIsAdmin, currentServer.ownerId, basePath, currentServer.slug, router, localMembers, authUser?.id],
   );
 
   useServerEvents({
