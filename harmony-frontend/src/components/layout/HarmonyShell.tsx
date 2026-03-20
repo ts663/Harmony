@@ -19,6 +19,7 @@ import { GuestPromoBanner } from '@/components/channel/GuestPromoBanner';
 import { CreateChannelModal } from '@/components/channel/CreateChannelModal';
 import { useAuth } from '@/hooks/useAuth';
 import { VoiceProvider } from '@/contexts/VoiceContext';
+import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
 import { ChannelType } from '@/types';
 import { useRouter } from 'next/navigation';
@@ -99,6 +100,19 @@ export function HarmonyShell({
   }
   // Local channels state so newly created channels appear immediately in the sidebar.
   const [localChannels, setLocalChannels] = useState<Channel[]>(channels);
+  // Map of serverId → default channel slug — used by BrowseServersModal for "Open" navigation.
+  // Mirrors the same derivation in ServerRail so both always agree on the default channel.
+  const defaultChannelByServerId = useMemo(() => {
+    const map = new Map<string, string>();
+    const textOrAnnouncement = allChannels
+      .filter(c => c.type === ChannelType.TEXT || c.type === ChannelType.ANNOUNCEMENT)
+      .sort((a, b) => a.position - b.position);
+    for (const channel of textOrAnnouncement) {
+      if (!map.has(channel.serverId)) map.set(channel.serverId, channel.slug);
+    }
+    return map;
+  }, [allChannels]);
+
   // Stable list of voice channel IDs for VoiceProvider — recomputed only when channels change.
   const voiceChannelIds = useMemo(
     () => localChannels.filter(c => c.type === ChannelType.VOICE).map(c => c.id),
@@ -136,6 +150,7 @@ export function HarmonyShell({
 
   const router = useRouter();
   const [isCreateServerOpen, setIsCreateServerOpen] = useState(false);
+  const [isBrowseServersOpen, setIsBrowseServersOpen] = useState(false);
   const [localServers, setLocalServers] = useState<Server[]>(servers);
   const [prevServers, setPrevServers] = useState<Server[]>(servers);
   if (prevServers !== servers) {
@@ -211,6 +226,7 @@ export function HarmonyShell({
         currentServerId={currentServer.id}
         basePath={basePath}
         isMobileVisible={isMenuOpen}
+        onBrowseServers={isAuthenticated ? () => setIsBrowseServersOpen(true) : undefined}
         onAddServer={
           isAuthLoading
             ? undefined
@@ -293,6 +309,14 @@ export function HarmonyShell({
         isOpen={isCreateServerOpen}
         onClose={() => setIsCreateServerOpen(false)}
         onCreated={handleServerCreated}
+      />
+
+      <BrowseServersModal
+        isOpen={isBrowseServersOpen}
+        onClose={() => setIsBrowseServersOpen(false)}
+        joinedServerIds={new Set(localServers.map(s => s.id))}
+        defaultChannelByServerId={defaultChannelByServerId}
+        basePath={basePath}
       />
 
       <SearchModal

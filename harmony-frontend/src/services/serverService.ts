@@ -141,6 +141,14 @@ export async function deleteServer(id: string): Promise<boolean> {
 }
 
 /**
+ * Join a public server by ID via the tRPC API.
+ * Throws if the server is private or the user is already a member.
+ */
+export async function joinServer(serverId: string): Promise<void> {
+  await trpcMutate('serverMember.joinServer', { serverId });
+}
+
+/**
  * Creates a new server via the tRPC API.
  * The backend auto-creates a default "general" channel.
  */
