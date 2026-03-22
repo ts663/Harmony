@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { TopBar } from '@/components/channel/TopBar';
 import { MembersSidebar } from '@/components/channel/MembersSidebar';
 import { SearchModal } from '@/components/channel/SearchModal';
+import { PinnedMessagesPanel } from '@/components/channel/PinnedMessagesPanel';
 import { ChannelSidebar } from '@/components/channel/ChannelSidebar';
 import { MessageInput } from '@/components/channel/MessageInput';
 import { MessageList } from '@/components/channel/MessageList';
@@ -93,6 +94,7 @@ export function HarmonyShell({
   const isMembersOpen = membersOverride !== null ? membersOverride : isDesktopViewport;
   const setIsMembersOpen = useCallback((val: boolean) => setMembersOverride(val), []);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isPinsOpen, setIsPinsOpen] = useState(false);
   // #c25: track mobile channel-sidebar state so aria-expanded on hamburger reflects reality
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   // Local message state so sent messages appear immediately without a page reload
@@ -104,6 +106,7 @@ export function HarmonyShell({
     setPrevChannelId(currentChannel.id);
     setLocalMessages(messages);
     setIsMenuOpen(false);
+    setIsPinsOpen(false);
     // Only auto-close the members sidebar on mobile so desktop keeps it open by default.
     if (typeof window !== 'undefined' && !window.matchMedia('(min-width: 640px)').matches) {
       setIsMembersOpen(false);
@@ -178,6 +181,12 @@ export function HarmonyShell({
   }
 
   const { notifyServerCreated } = useServerListSync();
+
+  // Show the pin UI to all authenticated members — the backend enforces message:pin
+  // permission (MODERATOR+) and will reject unauthorized calls with 403.
+  // Client-side role filtering is unreliable here because localMembers carries the
+  // global platform role, not the server-scoped membership role.
+  const canPin = isAuthenticated;
 
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
@@ -398,6 +407,7 @@ export function HarmonyShell({
             isMembersOpen={isMembersOpen}
             onMembersToggle={() => setIsMembersOpen(!isMembersOpen)}
             onSearchOpen={() => setIsSearchOpen(true)}
+            onPinsOpen={() => setIsPinsOpen(true)}
             isMenuOpen={isMenuOpen}
             onMenuToggle={() => setIsMenuOpen(v => !v)}
           />
@@ -408,6 +418,8 @@ export function HarmonyShell({
                 key={currentChannel.id}
                 channel={currentChannel}
                 messages={localMessages}
+                serverId={currentServer.id}
+                canPin={canPin}
               />
               <MessageInput
                 channelId={currentChannel.id}
@@ -423,6 +435,13 @@ export function HarmonyShell({
                 />
               )}
             </div>
+            <PinnedMessagesPanel
+              channelId={currentChannel.id}
+              serverId={currentServer.id}
+              channelName={currentChannel.name}
+              isOpen={isPinsOpen}
+              onClose={() => setIsPinsOpen(false)}
+            />
             <MembersSidebar
               members={members}
               isOpen={isMembersOpen}
