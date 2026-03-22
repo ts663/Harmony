@@ -181,6 +181,19 @@ export function HarmonyShell({
 
   const { notifyServerCreated } = useServerListSync();
 
+  // Derives whether the current user may pin/unpin messages in this server.
+  // Matches the backend permission matrix: message:pin requires MODERATOR+.
+  // checkIsAdmin(ownerId) covers system admins and the server owner.
+  const canPin = useMemo(() => {
+    if (!isAuthenticated) return false;
+    const memberRecord = localMembers.find(m => m.id === authUser?.id);
+    return (
+      checkIsAdmin(currentServer.ownerId) ||
+      memberRecord?.role === 'admin' ||
+      memberRecord?.role === 'moderator'
+    );
+  }, [isAuthenticated, localMembers, authUser?.id, checkIsAdmin, currentServer.ownerId]);
+
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
       setLocalServers(prev => [...prev, server]);
@@ -411,6 +424,8 @@ export function HarmonyShell({
                 key={currentChannel.id}
                 channel={currentChannel}
                 messages={localMessages}
+                serverId={currentServer.id}
+                canPin={canPin}
               />
               <MessageInput
                 channelId={currentChannel.id}
