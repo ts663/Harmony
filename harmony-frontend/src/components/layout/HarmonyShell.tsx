@@ -21,7 +21,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { VoiceProvider } from '@/contexts/VoiceContext';
 import { BrowseServersModal } from '@/components/server-rail/BrowseServersModal';
 import { useChannelEvents } from '@/hooks/useChannelEvents';
-import { ChannelType } from '@/types';
+import { useServerEvents } from '@/hooks/useServerEvents';
+import { useServerListSync } from '@/hooks/useServerListSync';
+import { ChannelType, ChannelVisibility, UserStatus } from '@/types';
 import { useRouter } from 'next/navigation';
 import { CreateServerModal } from '@/components/server-rail/CreateServerModal';
 import type { Server, Channel, Message, User } from '@/types';
@@ -32,6 +34,19 @@ const BG = {
   tertiary: 'bg-[#202225]',
   primary: 'bg-[#36393f]',
 };
+
+// ─── useSyncExternalStore helpers — module-level so references are stable ─────
+// React re-subscribes whenever the subscribe function reference changes. Inline
+// arrow functions create a new reference every render, causing the MediaQueryList
+// listener to be torn down and re-added on every message receive / state update.
+
+const subscribeToViewport = (cb: () => void) => {
+  const mql = window.matchMedia('(min-width: 640px)');
+  mql.addEventListener('change', cb);
+  return () => mql.removeEventListener('change', cb);
+};
+const getViewportSnapshot = () => window.matchMedia('(min-width: 640px)').matches;
+const getServerViewportSnapshot = () => false;
 
 // ─── Main Shell ───────────────────────────────────────────────────────────────
 
@@ -70,13 +85,9 @@ export function HarmonyShell({
   // useSyncExternalStore: SSR returns false (getServerSnapshot), client returns live viewport.
   // No useEffect setState needed — avoids both hydration mismatch and the linter rule.
   const isDesktopViewport = useSyncExternalStore(
-    cb => {
-      const mql = window.matchMedia('(min-width: 640px)');
-      mql.addEventListener('change', cb);
-      return () => mql.removeEventListener('change', cb);
-    },
-    () => window.matchMedia('(min-width: 640px)').matches,
-    () => false,
+    subscribeToViewport,
+    getViewportSnapshot,
+    getServerViewportSnapshot,
   );
 
   const isMembersOpen = membersOverride !== null ? membersOverride : isDesktopViewport;
@@ -126,6 +137,14 @@ export function HarmonyShell({
     setPrevChannelsProp(channels);
     setLocalChannels(channels);
   }
+  // Local members state so join/leave/status events update the sidebar without reload.
+  const [localMembers, setLocalMembers] = useState<User[]>(members);
+  // Reset when the members prop changes (server navigation or SSR revalidation).
+  const [prevMembersProp, setPrevMembersProp] = useState(members);
+  if (prevMembersProp !== members) {
+    setPrevMembersProp(members);
+    setLocalMembers(members);
+  }
   // Channel creation modal state.
   const [isCreateChannelOpen, setIsCreateChannelOpen] = useState(false);
   const [createChannelDefaultType, setCreateChannelDefaultType] = useState<ChannelType>(
@@ -158,12 +177,15 @@ export function HarmonyShell({
     setLocalServers(servers);
   }
 
+  const { notifyServerCreated } = useServerListSync();
+
   const handleServerCreated = useCallback(
     (server: Server, defaultChannel: Channel) => {
       setLocalServers(prev => [...prev, server]);
+      notifyServerCreated(server.id);
       router.push(`${basePath}/${server.slug}/${defaultChannel.slug}`);
     },
-    [basePath, router],
+    [basePath, notifyServerCreated, router],
   );
 
   const handleMessageSent = useCallback((msg: Message) => {
@@ -188,11 +210,115 @@ export function HarmonyShell({
     setLocalMessages(prev => prev.filter(m => m.id !== messageId));
   }, []);
 
+  const handleServerUpdated = useCallback((updatedServer: Server) => {
+    setLocalServers(prev =>
+      prev.map(s => (s.id === updatedServer.id ? { ...s, ...updatedServer } : s)),
+    );
+  }, []);
+
   useChannelEvents({
     channelId: currentChannel.id,
     onMessageCreated: handleRealTimeCreated,
     onMessageEdited: handleRealTimeEdited,
     onMessageDeleted: handleRealTimeDeleted,
+    onServerUpdated: handleServerUpdated,
+    enabled: isAuthenticated,
+  });
+
+  // ── Real-time channel list updates ────────────────────────────────────────
+
+  const handleChannelCreated = useCallback((channel: Channel) => {
+    setLocalChannels(prev => {
+      // Dedup: ignore if already in list (e.g. added optimistically by the creator)
+      if (prev.some(c => c.id === channel.id)) return prev;
+      // Insert before VOICE channels so text/announcement channels stay grouped
+      const insertIdx =
+        channel.type === ChannelType.VOICE
+          ? prev.length
+          : prev.findIndex(c => c.type === ChannelType.VOICE);
+      const at = insertIdx === -1 ? prev.length : insertIdx;
+      return [...prev.slice(0, at), channel, ...prev.slice(at)];
+    });
+  }, []);
+
+  const handleChannelUpdated = useCallback((channel: Channel) => {
+    setLocalChannels(prev => prev.map(c => (c.id === channel.id ? channel : c)));
+  }, []);
+
+  const handleChannelDeleted = useCallback(
+    (channelId: string) => {
+      setLocalChannels(prev => prev.filter(c => c.id !== channelId));
+      // Navigate away if the deleted channel is the one currently viewed
+      if (channelId === currentChannel.id) {
+        router.push(`${basePath}/${currentServer.slug}`);
+      }
+    },
+    [currentChannel.id, currentServer.slug, basePath, router],
+  );
+
+  // ── Real-time member list updates ─────────────────────────────────────────
+
+  const handleMemberJoined = useCallback((user: User) => {
+    setLocalMembers(prev => {
+      // Dedup: ignore if the user is already in the list
+      if (prev.some(m => m.id === user.id)) return prev;
+      return [...prev, user];
+    });
+  }, []);
+
+  const handleMemberLeft = useCallback((userId: string) => {
+    setLocalMembers(prev => prev.filter(m => m.id !== userId));
+  }, []);
+
+  const handleMemberStatusChanged = useCallback(({ id, status }: { id: string; status: UserStatus }) => {
+    setLocalMembers(prev => prev.map(m => (m.id === id ? { ...m, status } : m)));
+  }, []);
+
+  // ── Real-time visibility changes ──────────────────────────────────────────
+
+  const handleChannelVisibilityChanged = useCallback(
+    (channel: Channel, oldVisibility: ChannelVisibility) => {
+      // Update the channel's visibility in the sidebar immediately.
+      setLocalChannels(prev => prev.map(c => (c.id === channel.id ? channel : c)));
+
+      // If the current user is viewing this channel and it just became PRIVATE,
+      // redirect non-admin members to the server root so VisibilityGuard can
+      // gate access on re-render. Server owners and admins are not redirected
+      // because they retain access to PRIVATE channels.
+      // Note: useServerEvents is only enabled for authenticated users, so this
+      // callback only fires for authenticated sessions.
+      //
+      // checkIsAdmin(ownerId) covers the server owner and system admins.
+      // We look up the member record for the current user to check their
+      // server-scoped role ('owner'/'admin') because checkIsAdmin() with no arg
+      // checks AuthContext user.role, which is always 'member' for non-system-admin
+      // users (mapBackendUser sets role: 'member' for all non-system-admin users).
+      const memberRecord = localMembers.find(m => m.id === authUser?.id);
+      const userIsAdminOrOwner =
+        checkIsAdmin(currentServer.ownerId) ||
+        memberRecord?.role === 'owner' ||
+        memberRecord?.role === 'admin';
+      if (
+        channel.id === currentChannel.id &&
+        oldVisibility !== ChannelVisibility.PRIVATE &&
+        channel.visibility === ChannelVisibility.PRIVATE &&
+        !userIsAdminOrOwner
+      ) {
+        router.push(`${basePath}/${currentServer.slug}`);
+      }
+    },
+    [currentChannel.id, checkIsAdmin, currentServer.ownerId, basePath, currentServer.slug, router, localMembers, authUser?.id],
+  );
+
+  useServerEvents({
+    serverId: currentServer.id,
+    onChannelCreated: handleChannelCreated,
+    onChannelUpdated: handleChannelUpdated,
+    onChannelDeleted: handleChannelDeleted,
+    onMemberJoined: handleMemberJoined,
+    onMemberLeft: handleMemberLeft,
+    onMemberStatusChanged: handleMemberStatusChanged,
+    onChannelVisibilityChanged: handleChannelVisibilityChanged,
     enabled: isAuthenticated,
   });
 
