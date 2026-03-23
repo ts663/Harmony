@@ -197,15 +197,9 @@ export function HarmonyShell({
     [basePath, notifyServerCreated, router],
   );
 
-  // Notify other tabs that the user joined a server so they refresh their server rail.
-  // The current tab navigates to the new server route which triggers a fresh Server
-  // Component render, so localServers is updated via the incoming `servers` prop.
-  const handleServerJoined = useCallback(
-    (serverId: string) => {
-      notifyServerJoined(serverId);
-    },
-    [notifyServerJoined],
-  );
+  // notifyServerJoined is a stable reference from useServerListSync — pass directly.
+  // Other tabs receive the broadcast and call router.refresh(); the current tab
+  // navigates to the new server route which re-renders with the updated servers prop.
 
   const handleMessageSent = useCallback((msg: Message) => {
     // Dedup: the SSE event for the sender's own message can arrive before the tRPC
@@ -484,7 +478,7 @@ export function HarmonyShell({
           joinedServerIds={new Set(localServers.map(s => s.id))}
           defaultChannelByServerId={defaultChannelByServerId}
           basePath={basePath}
-          onJoined={handleServerJoined}
+          onJoined={notifyServerJoined}
         />
 
         <SearchModal
