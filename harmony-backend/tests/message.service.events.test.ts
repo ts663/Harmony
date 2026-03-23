@@ -315,12 +315,15 @@ describe('messageService.deleteMessage — event publishing', () => {
 
 describe('messageService.createReply — event publishing', () => {
   beforeEach(() => {
+    // Explicitly set channel mock (also set by outer beforeEach, but kept here to
+    // make the dependency on channel validation visible and resilient to outer changes).
+    mockChannelFindUnique.mockResolvedValue(MOCK_CHANNEL);
     mockMessageFindUnique.mockResolvedValue(MOCK_PARENT_MESSAGE);
     mockMessageCreate.mockResolvedValue(MOCK_REPLY);
     mockMessageUpdate.mockResolvedValue({ ...MOCK_PARENT_MESSAGE, replyCount: 1 });
   });
 
-  it('publishes MESSAGE_CREATED with messageId, channelId, parentMessageId, and timestamp', async () => {
+  it('publishes MESSAGE_CREATED with messageId, channelId, authorId, parentMessageId, and timestamp', async () => {
     await messageService.createReply({
       parentMessageId: MESSAGE_ID,
       channelId: CHANNEL_ID,
@@ -335,6 +338,7 @@ describe('messageService.createReply — event publishing', () => {
       expect.objectContaining({
         messageId: REPLY_ID,
         channelId: CHANNEL_ID,
+        authorId: AUTHOR_ID,
         parentMessageId: MESSAGE_ID,
         timestamp: expect.any(String),
       }),

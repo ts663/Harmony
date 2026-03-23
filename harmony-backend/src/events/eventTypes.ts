@@ -39,7 +39,8 @@ export interface VisibilityChangedPayload {
 export interface MessageCreatedPayload {
   messageId: string;
   channelId: string;
-  authorId?: string;
+  authorId: string;
+  /** Present only when the message is a thread reply; absent for top-level channel messages. */
   parentMessageId?: string;
   timestamp: string;
 }
