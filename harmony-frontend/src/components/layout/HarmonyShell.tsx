@@ -180,7 +180,7 @@ export function HarmonyShell({
     setLocalServers(servers);
   }
 
-  const { notifyServerCreated } = useServerListSync();
+  const { notifyServerCreated, notifyServerJoined } = useServerListSync();
 
   // Show the pin UI to all authenticated members — the backend enforces message:pin
   // permission (MODERATOR+) and will reject unauthorized calls with 403.
@@ -196,6 +196,10 @@ export function HarmonyShell({
     },
     [basePath, notifyServerCreated, router],
   );
+
+  // notifyServerJoined is a stable reference from useServerListSync — pass directly.
+  // Other tabs receive the broadcast and call router.refresh(); the current tab
+  // navigates to the new server route which re-renders with the updated servers prop.
 
   const handleMessageSent = useCallback((msg: Message) => {
     // Dedup: the SSE event for the sender's own message can arrive before the tRPC
@@ -279,9 +283,12 @@ export function HarmonyShell({
     setLocalMembers(prev => prev.filter(m => m.id !== userId));
   }, []);
 
-  const handleMemberStatusChanged = useCallback(({ id, status }: { id: string; status: UserStatus }) => {
-    setLocalMembers(prev => prev.map(m => (m.id === id ? { ...m, status } : m)));
-  }, []);
+  const handleMemberStatusChanged = useCallback(
+    ({ id, status }: { id: string; status: UserStatus }) => {
+      setLocalMembers(prev => prev.map(m => (m.id === id ? { ...m, status } : m)));
+    },
+    [],
+  );
 
   // ── Real-time visibility changes ──────────────────────────────────────────
 
@@ -316,7 +323,16 @@ export function HarmonyShell({
         router.push(`${basePath}/${currentServer.slug}`);
       }
     },
-    [currentChannel.id, checkIsAdmin, currentServer.ownerId, basePath, currentServer.slug, router, localMembers, authUser?.id],
+    [
+      currentChannel.id,
+      checkIsAdmin,
+      currentServer.ownerId,
+      basePath,
+      currentServer.slug,
+      router,
+      localMembers,
+      authUser?.id,
+    ],
   );
 
   useServerEvents({
@@ -462,6 +478,7 @@ export function HarmonyShell({
           joinedServerIds={new Set(localServers.map(s => s.id))}
           defaultChannelByServerId={defaultChannelByServerId}
           basePath={basePath}
+          onJoined={notifyServerJoined}
         />
 
         <SearchModal
