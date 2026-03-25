@@ -1,63 +1,67 @@
 /**
- * HTTP status mapping test for permission denials on pin actions.
+ * HTTP status for permission denials on `message.pinMessage`.
  *
- * Regression guard for: member pin attempts must return HTTP 403 (FORBIDDEN),
- * not HTTP 500.
+ * A MEMBER must not pin; the API must respond with HTTP 403 (FORBIDDEN), not 500.
+ *
+ * The earlier version used a stub router + mocked `requirePermission`, which always
+ * produced a well-formed FORBIDDEN and hid real HTTP behavior. This file uses the
+ * real app, real `message.pinMessage` mutation (POST), and mocks Prisma so tests
+ * run without a live database while exercising the same code paths as production.
  */
 
-import express from 'express';
+import jwt from 'jsonwebtoken';
 import request from 'supertest';
-import { z } from 'zod';
-import { TRPCError } from '@trpc/server';
-import { createExpressMiddleware } from '@trpc/server/adapters/express';
+import { createApp } from '../src/app';
 
-jest.mock('../src/services/auth.service', () => ({
-  authService: {
-    verifyAccessToken: jest.fn(() => ({ sub: '00000000-0000-0000-0000-0000000000aa' })),
+jest.mock('../src/db/prisma', () => ({
+  prisma: {
+    user: { findUnique: jest.fn() },
+    server: { findUnique: jest.fn() },
+    serverMember: { findUnique: jest.fn() },
   },
 }));
 
-jest.mock('../src/services/permission.service', () => ({
-  permissionService: {
-    requirePermission: jest.fn(async () => {
-      throw new TRPCError({ code: 'FORBIDDEN', message: 'Access denied' });
-    }),
-  },
-}));
+import { prisma } from '../src/db/prisma';
 
-import { createContext, router, withPermission } from '../src/trpc/init';
+const prismaMock = prisma as unknown as {
+  user: { findUnique: jest.Mock };
+  server: { findUnique: jest.Mock };
+  serverMember: { findUnique: jest.Mock };
+};
 
-const testRouter = router({
-  pinMessage: withPermission('message:pin')
-    .input(z.object({ serverId: z.string().uuid() }))
-    .query(() => ({ ok: true })),
-});
+const serverId = '00000000-0000-0000-0000-000000000001';
+const memberId = '00000000-0000-0000-0000-0000000000aa';
+const messageId = '00000000-0000-0000-0000-0000000000bb';
 
-function createTestApp() {
-  const app = express();
-  app.use(
-    '/trpc',
-    createExpressMiddleware({
-      router: testRouter,
-      createContext,
-    }),
-  );
-  return app;
+/** Must match `auth.service` / `JWT_ACCESS_SECRET` (loaded via jest setupFiles: dotenv/config). */
+function accessSecretForTest(): string {
+  return process.env.JWT_ACCESS_SECRET ?? 'dev-access-secret-change-in-prod';
 }
 
-describe('message pin permission denial HTTP mapping', () => {
-  it('returns 403 (not 500) when permission middleware throws FORBIDDEN', async () => {
-    const app = createTestApp();
-    const serverId = '00000000-0000-0000-0000-000000000001';
+beforeEach(() => {
+  jest.clearAllMocks();
+  prismaMock.user.findUnique.mockResolvedValue({ email: 'member@test.com' });
+  prismaMock.server.findUnique.mockResolvedValue({ id: serverId });
+  prismaMock.serverMember.findUnique.mockResolvedValue({ role: 'MEMBER' });
+});
+
+describe('message.pinMessage HTTP — permission denial', () => {
+  it('returns 403 FORBIDDEN when a MEMBER attempts to pin (not 500)', async () => {
+    const app = createApp();
+    const token = jwt.sign({ sub: memberId }, accessSecretForTest(), { expiresIn: '15m' });
 
     const res = await request(app)
-      .get(`/trpc/pinMessage?input=${encodeURIComponent(JSON.stringify({ serverId }))}`)
-      .set('Authorization', 'Bearer test-token')
-      .set('Accept', 'application/json');
+      .post('/trpc/message.pinMessage')
+      .set('Origin', 'http://localhost:3000')
+      .set('Authorization', `Bearer ${token}`)
+      .set('Content-Type', 'application/json')
+      .set('Accept', 'application/json')
+      .send({ serverId, messageId });
 
+    // Correct contract: permission denial is FORBIDDEN → HTTP 403, never 500.
+    // If the implementation still maps this case to 500, this test fails (TDD red).
     expect(res.status).toBe(403);
     expect(res.body.error).toBeDefined();
     expect(res.body.error.data.code).toBe('FORBIDDEN');
   });
 });
-
